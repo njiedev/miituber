@@ -46,6 +46,8 @@ raw-frame cost. The output diagnostics show `Raw frames` so OBS testing can
 confirm the raw path is off until the native sink exists.
 When the native sink becomes ready, the `MiiTuber Camera` diagnostic row should
 show the number of raw frames handed off and the last raw frame size.
+The app refreshes native sink status immediately before Start Output so raw-frame
+capture is gated by current readiness, not just the startup check.
 
 ## Windows Implementation Track
 

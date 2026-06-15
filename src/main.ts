@@ -313,11 +313,13 @@ async function refreshNativeCameraStatus() {
     currentNativeCameraStatus = status;
     setNativeCameraStatus(status);
     logRenderEvent("native camera status checked", status);
+    return status;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     currentNativeCameraStatus = null;
     setNativeCameraStatus(null, `Could not check native camera: ${message}`);
     console.error("[MiiTuber] get_native_camera_status failed", { error, message });
+    return null;
   }
 }
 
@@ -1296,6 +1298,8 @@ startOutputButton?.addEventListener("click", async () => {
   const settings = getOutputSettings();
 
   try {
+    setOutputStatus("Checking output sinks...");
+    const nativeStatus = await refreshNativeCameraStatus();
     setOutputStatus("Starting output session in Rust...");
     const status = await invoke<VirtualCameraStatus>("start_virtual_camera", {
       request: settings,
@@ -1331,6 +1335,9 @@ startOutputButton?.addEventListener("click", async () => {
     setOutputObsDetected(status.obsDetected);
     updateRawFrameDebugValue(status);
     logRenderEvent("virtual camera output started", settings);
+    if (nativeStatus?.rawFrameSinkReady) {
+      logRenderEvent("native raw frame sink ready at output start", nativeStatus);
+    }
   } catch (error) {
     outputFrameLoop = null;
     currentOutputStatus = null;
