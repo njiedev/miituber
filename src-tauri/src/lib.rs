@@ -1,4 +1,6 @@
 use sha2::{Digest, Sha256};
+#[cfg(target_os = "windows")]
+use std::process::Command;
 use std::{
     collections::HashMap,
     io::{Read, Write},
@@ -25,6 +27,7 @@ const OUTPUT_MJPEG_URL: &str = "http://127.0.0.1:49321/stream.mjpeg";
 const OUTPUT_TRANSPARENT_SOURCE_URL: &str = "http://127.0.0.1:49321/source-transparent.html";
 const MJPEG_BOUNDARY: &str = "miituber-frame";
 const OUTPUT_SERVER_HOME_MARKER: &str = "MiiTuber output server";
+const NATIVE_CAMERA_DEVICE_NAME: &str = "MiiTuber Camera";
 
 #[derive(serde::Serialize)]
 struct RendererStatus {
@@ -530,14 +533,17 @@ async fn get_native_camera_status(
 ) -> Result<NativeCameraStatus, String> {
     let native_sink = native_sink
         .lock()
-        .map(|state| NativeCameraSinkState {
-            device_installed: state.device_installed,
-            raw_frame_sink_ready: state.raw_frame_sink_ready,
-            width: state.width,
-            height: state.height,
-            fps: state.fps,
-            published_frame_count: state.published_frame_count,
-            last_frame_bytes: state.last_frame_bytes,
+        .map(|mut state| {
+            state.device_installed = native_camera_device_installed();
+            NativeCameraSinkState {
+                device_installed: state.device_installed,
+                raw_frame_sink_ready: state.raw_frame_sink_ready,
+                width: state.width,
+                height: state.height,
+                fps: state.fps,
+                published_frame_count: state.published_frame_count,
+                last_frame_bytes: state.last_frame_bytes,
+            }
         })
         .map_err(|_| "Native camera sink state lock failed".to_string())?;
 
@@ -636,7 +642,7 @@ fn virtual_camera_status_from_session(session: &VirtualCameraSession) -> Virtual
 }
 
 fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraStatus {
-    let device_name = "MiiTuber Camera".to_string();
+    let device_name = NATIVE_CAMERA_DEVICE_NAME.to_string();
 
     #[cfg(target_os = "windows")]
     {
@@ -682,6 +688,43 @@ fn native_camera_status_message(sink: &NativeCameraSinkState) -> String {
     } else {
         "Native Windows camera device is not installed yet. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string()
     }
+}
+
+#[cfg(target_os = "windows")]
+fn native_camera_device_installed() -> bool {
+    let script = "Get-PnpDevice -Class Camera,Image,Media -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FriendlyName";
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            native_camera_device_list_contains_miituber(&stdout)
+        }
+        Ok(output) => {
+            eprintln!(
+                "native_camera_device_installed: PowerShell exited with status {:?}",
+                output.status.code()
+            );
+            false
+        }
+        Err(error) => {
+            eprintln!("native_camera_device_installed: could not run PowerShell: {error}");
+            false
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn native_camera_device_installed() -> bool {
+    false
+}
+
+fn native_camera_device_list_contains_miituber(device_list: &str) -> bool {
+    device_list
+        .lines()
+        .any(|line| line.trim().eq_ignore_ascii_case(NATIVE_CAMERA_DEVICE_NAME))
 }
 
 fn ensure_output_server_started(state: SharedVirtualCameraState) {
@@ -1183,10 +1226,10 @@ mod tests {
     use super::{
         calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
         is_jpeg_frame, is_png_frame, latest_jpeg, latest_png, latest_rgba,
-        native_camera_status_from_sink, normalize_mii_data_for_renderer,
-        output_server_home_response_is_ours, output_session_is_running, publish_output_frame,
-        start_output_session, stop_output_session, validate_rgba_frame,
-        virtual_camera_status_from_session, NativeCameraSinkState,
+        native_camera_device_list_contains_miituber, native_camera_status_from_sink,
+        normalize_mii_data_for_renderer, output_server_home_response_is_ours,
+        output_session_is_running, publish_output_frame, start_output_session, stop_output_session,
+        validate_rgba_frame, virtual_camera_status_from_session, NativeCameraSinkState,
         PublishVirtualCameraFrameRequest, SharedNativeCameraSinkState, SharedVirtualCameraState,
         StartVirtualCameraRequest, VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS,
         OUTPUT_FRAME_URL, OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
@@ -1482,6 +1525,24 @@ mod tests {
         assert!(!status.device_installed);
         assert!(!status.raw_frame_sink_ready);
         assert!(status.message.contains("OBS") || status.message.contains("Windows"));
+    }
+
+    #[test]
+    fn native_camera_device_list_matches_exact_friendly_name() {
+        assert!(native_camera_device_list_contains_miituber(
+            "Integrated Webcam\r\nMiiTuber Camera\r\nOBS Virtual Camera\r\n"
+        ));
+        assert!(native_camera_device_list_contains_miituber(
+            " integrated webcam \n miituber camera \n"
+        ));
+    }
+
+    #[test]
+    fn native_camera_device_list_rejects_partial_friendly_name() {
+        assert!(!native_camera_device_list_contains_miituber(
+            "MiiTuber Camera Helper\r\nOBS Virtual Camera\r\n"
+        ));
+        assert!(!native_camera_device_list_contains_miituber(""));
     }
 
     #[test]

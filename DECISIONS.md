@@ -48,3 +48,4 @@
 - Chose to route published raw frames through `NativeCameraSinkState` because the future Windows camera implementation should replace one handoff hook, not thread driver calls through the OBS HTTP server.
 - Chose to configure the native sink on Start Output because a Windows camera sink needs the active width, height, and fps before accepting raw frames.
 - Chose to validate raw frames against the native sink's configured output format because the sink should defend its own device contract, not rely only on caller-side validation.
+- Chose Windows PnP friendly-name probing for first native camera detection because it can confirm whether `MiiTuber Camera` is installed before driver/source implementation lands.
