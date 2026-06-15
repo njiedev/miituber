@@ -43,8 +43,49 @@ type SharedRenderCache = Arc<RenderCache>;
 #[derive(Default)]
 struct VirtualCameraState {
     session: Mutex<VirtualCameraSession>,
+    frames: OutputFrameStore,
+}
+
+#[derive(Default)]
+struct OutputFrameStore {
     latest_jpeg: Mutex<Option<Vec<u8>>>,
     latest_png: Mutex<Option<Vec<u8>>>,
+}
+
+impl OutputFrameStore {
+    fn publish(&self, jpeg_bytes: Vec<u8>, png_bytes: Option<Vec<u8>>) -> Result<(), String> {
+        *self
+            .latest_jpeg
+            .lock()
+            .map_err(|_| "Latest output frame lock failed".to_string())? = Some(jpeg_bytes);
+        *self
+            .latest_png
+            .lock()
+            .map_err(|_| "Latest transparent output frame lock failed".to_string())? = png_bytes;
+
+        Ok(())
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        *self
+            .latest_jpeg
+            .lock()
+            .map_err(|_| "Latest output frame lock failed".to_string())? = None;
+        *self
+            .latest_png
+            .lock()
+            .map_err(|_| "Latest transparent output frame lock failed".to_string())? = None;
+
+        Ok(())
+    }
+
+    fn latest_jpeg(&self) -> Option<Vec<u8>> {
+        self.latest_jpeg.lock().ok().and_then(|frame| frame.clone())
+    }
+
+    fn latest_png(&self) -> Option<Vec<u8>> {
+        self.latest_png.lock().ok().and_then(|frame| frame.clone())
+    }
 }
 
 #[derive(Default)]
@@ -403,17 +444,12 @@ async fn publish_virtual_camera_frame(
         ));
     }
 
+    let frame_bytes = request.jpeg_bytes.len();
+    state
+        .frames
+        .publish(request.jpeg_bytes, request.png_bytes)?;
     session.frame_count = request.frame_index;
-    session.last_frame_bytes = request.jpeg_bytes.len();
-    *state
-        .latest_jpeg
-        .lock()
-        .map_err(|_| "Latest output frame lock failed".to_string())? = Some(request.jpeg_bytes);
-    *state
-        .latest_png
-        .lock()
-        .map_err(|_| "Latest transparent output frame lock failed".to_string())? =
-        request.png_bytes;
+    session.last_frame_bytes = frame_bytes;
 
     Ok(virtual_camera_status_from_session(&session))
 }
@@ -658,27 +694,15 @@ fn output_session_is_running(state: &SharedVirtualCameraState) -> bool {
 }
 
 fn latest_png(state: &SharedVirtualCameraState) -> Option<Vec<u8>> {
-    state.latest_png.lock().ok().and_then(|frame| frame.clone())
+    state.frames.latest_png()
 }
 
 fn latest_jpeg(state: &SharedVirtualCameraState) -> Option<Vec<u8>> {
-    state
-        .latest_jpeg
-        .lock()
-        .ok()
-        .and_then(|frame| frame.clone())
+    state.frames.latest_jpeg()
 }
 
 fn clear_latest_output_frame(state: &SharedVirtualCameraState) -> Result<(), String> {
-    *state
-        .latest_jpeg
-        .lock()
-        .map_err(|_| "Latest output frame lock failed".to_string())? = None;
-    *state
-        .latest_png
-        .lock()
-        .map_err(|_| "Latest transparent output frame lock failed".to_string())? = None;
-    Ok(())
+    state.frames.clear()
 }
 
 fn is_jpeg_frame(bytes: &[u8]) -> bool {
@@ -1040,7 +1064,10 @@ mod tests {
     #[test]
     fn latest_jpeg_reads_published_frame_snapshot() {
         let state = SharedVirtualCameraState::default();
-        *state.latest_jpeg.lock().unwrap() = Some(vec![0xff, 0xd8, 0xff, 0xe0]);
+        state
+            .frames
+            .publish(vec![0xff, 0xd8, 0xff, 0xe0], None)
+            .unwrap();
 
         assert_eq!(latest_jpeg(&state), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
     }
@@ -1048,13 +1075,34 @@ mod tests {
     #[test]
     fn clear_latest_output_frame_removes_stale_frame() {
         let state = SharedVirtualCameraState::default();
-        *state.latest_jpeg.lock().unwrap() = Some(vec![0xff, 0xd8, 0xff, 0xe0]);
-        *state.latest_png.lock().unwrap() = Some(b"\x89PNG\r\n\x1a\n".to_vec());
+        state
+            .frames
+            .publish(
+                vec![0xff, 0xd8, 0xff, 0xe0],
+                Some(b"\x89PNG\r\n\x1a\n".to_vec()),
+            )
+            .unwrap();
 
         clear_latest_output_frame(&state).unwrap();
 
         assert_eq!(latest_jpeg(&state), None);
         assert_eq!(latest_png(&state), None);
+    }
+
+    #[test]
+    fn output_frame_store_tracks_jpeg_and_transparent_frame_together() {
+        let state = SharedVirtualCameraState::default();
+
+        state
+            .frames
+            .publish(
+                vec![0xff, 0xd8, 0xff, 0xe0],
+                Some(b"\x89PNG\r\n\x1a\nabc".to_vec()),
+            )
+            .unwrap();
+
+        assert_eq!(latest_jpeg(&state), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
+        assert_eq!(latest_png(&state), Some(b"\x89PNG\r\n\x1a\nabc".to_vec()));
     }
 
     #[test]

@@ -13,11 +13,14 @@ The app already has the right producer side:
 - Webview renders fixed-resolution frames at 30 or 60 fps.
 - Rust owns output session state.
 - Rust receives each published frame through `publish_virtual_camera_frame`.
+- Rust stores the latest opaque and transparent frames in `OutputFrameStore`.
 - Rust currently exposes those frames through JPEG/MJPEG/PNG HTTP endpoints for
   OBS Browser Source.
 
 The native camera should attach at the same Rust boundary. The webview should
 not know whether frames go to MJPEG, OBS, or a Windows camera device.
+That means the native camera sink should consume from `OutputFrameStore`, not
+from the HTTP route handlers.
 
 ## Recommended Architecture
 

@@ -41,3 +41,4 @@
 - Chose to reject MJPEG requests while output is stopped and close streams on Stop Output because OBS should reflect the app's output session state instead of waiting on stale connections.
 - Chose native Windows "MiiTuber Camera" as the next output track after OBS-first verification because Mohammed wants the app to appear as its own webcam like VTube Studio.
 - Chose a read-only native camera status boundary before driver work because the app should clearly distinguish the working OBS stream from the future Windows device.
+- Chose a Rust `OutputFrameStore` boundary because OBS HTTP routes and the future native Windows camera should consume the same published frames without depending on each other.
