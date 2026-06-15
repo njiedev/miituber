@@ -59,8 +59,10 @@ The app already has the right producer side:
 - The repo now has a separate `src-tauri/native-camera-source` cdylib crate for
   the COM DLL that Windows Camera Frame Server will load. It exports the standard
   COM DLL entry points, shares the same CLSID, and now returns an `IClassFactory`
-  for that CLSID. The factory still returns `E_NOTIMPL` from `CreateInstance`
-  until the `IMFMediaSource` exists.
+  for that CLSID. The factory now returns a first `IMFMediaSource` skeleton that
+  supports `IUnknown`, `IMFMediaEventGenerator`, and `IMFMediaSource`, while its
+  source/event methods still return `E_NOTIMPL` until descriptors and streams
+  exist.
 - When raw-frame delivery is enabled, the native sink stores the latest BGRA
   frame snapshot, including frame index, resolution, fps, stride, Media
   Foundation 100ns sample timing, and bytes, for the future source to read.
@@ -132,8 +134,8 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
 - Then replace the dormant lifecycle hook with actual Windows camera
   registration/start/stop work. The first guarded registration wrapper exists;
   the source DLL boundary and class factory now exist; the next step is
-  implementing `IMFMediaSource` / `IMFMediaStream` so the DLL can serve BGRA
-  samples when Windows activates the CLSID.
+  implementing the presentation descriptor and `IMFMediaStream` so the DLL can
+  serve BGRA samples when Windows activates the CLSID.
 
 ## Acceptance Proof
 

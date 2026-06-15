@@ -17,14 +17,16 @@ Current state:
   - `DllUnregisterServer`
 - Uses the same CLSID string as the Tauri registration path.
 - `DllGetClassObject` returns an `IClassFactory` for the MiiTuber source CLSID.
-- The class factory currently returns `E_NOTIMPL` from `CreateInstance` until the
-  `IMFMediaSource` exists.
+- The class factory returns a first `IMFMediaSource` COM object skeleton.
+- The media source object supports `IUnknown`, `IMFMediaEventGenerator`, and
+  `IMFMediaSource`, but its source/event methods still return `E_NOTIMPL` until
+  descriptors, streams, and frame delivery exist.
 - Registration exports still return `E_NOTIMPL` so the DLL is not registered as
   a usable camera source before it can serve frames.
 
 Next implementation steps:
 
-1. Implement an `IMFMediaSource` + `IMFMediaStream` pair that advertises BGRA /
+1. Implement a presentation descriptor and media stream that advertise BGRA /
    RGB32 frames at the active MiiTuber output resolution and FPS.
 2. Add a shared-memory or named-pipe handoff from the Tauri app to this DLL so
    the source can read the latest BGRA snapshot when Frame Server requests a

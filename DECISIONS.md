@@ -66,3 +66,4 @@
 - Chose a separate native camera source-registration probe because `MFCreateVirtualCamera` can only expose a useful camera after Windows can activate the CLSID-backed Media Foundation source.
 - Chose a separate `miituber-native-camera-source` cdylib crate because Windows Camera Frame Server loads the virtual camera source as a COM DLL outside the Tauri app process.
 - Chose to implement the source DLL class factory before `IMFMediaSource` because Windows activation needs the COM factory boundary before frame streaming can be debugged.
+- Chose to return an `IMFMediaSource` skeleton before descriptors and streams because COM activation can be verified separately from the Media Foundation presentation model.
