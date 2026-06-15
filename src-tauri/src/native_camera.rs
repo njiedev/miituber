@@ -4,7 +4,7 @@ use std::process::Command;
 pub(crate) const NATIVE_CAMERA_DEVICE_NAME: &str = "MiiTuber Camera";
 const WINDOWS_VIRTUAL_CAMERA_MIN_BUILD: u32 = 22000;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct NativeCameraSinkState {
     pub(crate) device_probe_available: bool,
     pub(crate) device_installed: bool,
@@ -14,6 +14,7 @@ pub(crate) struct NativeCameraSinkState {
     pub(crate) fps: u32,
     pub(crate) published_frame_count: u64,
     pub(crate) last_frame_bytes: usize,
+    latest_bgra_frame: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +31,7 @@ impl NativeCameraSinkState {
         self.fps = fps;
         self.published_frame_count = 0;
         self.last_frame_bytes = 0;
+        self.latest_bgra_frame = None;
     }
 
     fn clear_output(&mut self) {
@@ -38,6 +40,7 @@ impl NativeCameraSinkState {
         self.fps = 0;
         self.published_frame_count = 0;
         self.last_frame_bytes = 0;
+        self.latest_bgra_frame = None;
     }
 
     pub(crate) fn publish_raw_frame(
@@ -65,7 +68,13 @@ impl NativeCameraSinkState {
         let bgra_bytes = rgba_to_bgra_frame(rgba_bytes)?;
         self.published_frame_count = frame_index;
         self.last_frame_bytes = bgra_bytes.len();
+        self.latest_bgra_frame = Some(bgra_bytes);
         Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn latest_bgra_frame(&self) -> Option<Vec<u8>> {
+        self.latest_bgra_frame.clone()
     }
 
     fn expected_raw_frame_len(&self) -> Result<usize, String> {

@@ -475,16 +475,7 @@ async fn get_native_camera_status(
             if !state.device_installed {
                 state.raw_frame_sink_ready = false;
             }
-            NativeCameraSinkState {
-                device_probe_available: state.device_probe_available,
-                device_installed: state.device_installed,
-                raw_frame_sink_ready: state.raw_frame_sink_ready,
-                width: state.width,
-                height: state.height,
-                fps: state.fps,
-                published_frame_count: state.published_frame_count,
-                last_frame_bytes: state.last_frame_bytes,
-            }
+            state.clone()
         })
         .map_err(|_| "Native camera sink state lock failed".to_string())?;
 
@@ -1132,6 +1123,17 @@ mod tests {
         }
     }
 
+    fn ready_native_sink(width: u32, height: u32, fps: u32) -> NativeCameraSinkState {
+        let mut sink = NativeCameraSinkState::default();
+        sink.device_probe_available = true;
+        sink.device_installed = true;
+        sink.raw_frame_sink_ready = true;
+        sink.width = width;
+        sink.height = height;
+        sink.fps = fps;
+        sink
+    }
+
     #[test]
     fn accepts_supported_mii_data_lengths() {
         let ffsd = normalize_mii_data_for_renderer(&vec![0; FFL_STORE_DATA_LEN]).unwrap();
@@ -1421,20 +1423,11 @@ mod tests {
 
     #[test]
     fn native_camera_status_reflects_sink_readiness() {
-        let status = native_camera_status_from_sink(
-            &NativeCameraSinkState {
-                device_probe_available: true,
-                device_installed: true,
-                raw_frame_sink_ready: true,
-                width: 1280,
-                height: 720,
-                fps: 30,
-                published_frame_count: 7,
-                last_frame_bytes: 16,
-            },
-            Some(22000),
-            true,
-        );
+        let mut sink = ready_native_sink(1280, 720, 30);
+        sink.published_frame_count = 7;
+        sink.last_frame_bytes = 16;
+
+        let status = native_camera_status_from_sink(&sink, Some(22000), true);
 
         assert_eq!(status.device_name, "MiiTuber Camera");
 
@@ -1456,20 +1449,12 @@ mod tests {
 
     #[test]
     fn native_camera_status_does_not_report_ready_without_device() {
-        let status = native_camera_status_from_sink(
-            &NativeCameraSinkState {
-                device_probe_available: true,
-                device_installed: false,
-                raw_frame_sink_ready: true,
-                width: 1280,
-                height: 720,
-                fps: 30,
-                published_frame_count: 7,
-                last_frame_bytes: 16,
-            },
-            Some(22000),
-            true,
-        );
+        let mut sink = ready_native_sink(1280, 720, 30);
+        sink.device_installed = false;
+        sink.published_frame_count = 7;
+        sink.last_frame_bytes = 16;
+
+        let status = native_camera_status_from_sink(&sink, Some(22000), true);
 
         assert!(!status.device_installed);
         assert!(!status.raw_frame_sink_ready);
@@ -1477,20 +1462,12 @@ mod tests {
 
     #[test]
     fn native_camera_status_reports_unavailable_probe_separately() {
-        let status = native_camera_status_from_sink(
-            &NativeCameraSinkState {
-                device_probe_available: false,
-                device_installed: false,
-                raw_frame_sink_ready: false,
-                width: 1280,
-                height: 720,
-                fps: 30,
-                published_frame_count: 0,
-                last_frame_bytes: 0,
-            },
-            Some(22000),
-            true,
-        );
+        let mut sink = NativeCameraSinkState::default();
+        sink.width = 1280;
+        sink.height = 720;
+        sink.fps = 30;
+
+        let status = native_camera_status_from_sink(&sink, Some(22000), true);
 
         assert!(!status.device_probe_available);
         assert!(!status.device_installed);
@@ -1528,6 +1505,7 @@ mod tests {
 
         assert_eq!(sink.published_frame_count, 0);
         assert_eq!(sink.last_frame_bytes, 0);
+        assert_eq!(sink.latest_bgra_frame(), None);
     }
 
     #[test]
@@ -1572,64 +1550,54 @@ mod tests {
         assert!(!sink.raw_frame_sink_ready);
         assert_eq!(sink.published_frame_count, 0);
         assert_eq!(sink.last_frame_bytes, 0);
+        assert_eq!(sink.latest_bgra_frame(), None);
     }
 
     #[test]
     fn native_camera_sink_counts_raw_frames_when_ready() {
-        let mut sink = NativeCameraSinkState {
-            device_probe_available: true,
-            device_installed: true,
-            raw_frame_sink_ready: true,
-            width: 2,
-            height: 2,
-            fps: 30,
-            published_frame_count: 0,
-            last_frame_bytes: 0,
-        };
+        let mut sink = ready_native_sink(2, 2, 30);
 
-        sink.publish_raw_frame(7, Some(&[0; 16])).unwrap();
+        sink.publish_raw_frame(
+            7,
+            Some(&[
+                0x10, 0x20, 0x30, 0xff, 0x01, 0x02, 0x03, 0x80, 0xaa, 0xbb, 0xcc, 0x40, 0x00, 0x11,
+                0x22, 0x20,
+            ]),
+        )
+        .unwrap();
 
         assert_eq!(sink.published_frame_count, 7);
         assert_eq!(sink.last_frame_bytes, 16);
+        assert_eq!(
+            sink.latest_bgra_frame(),
+            Some(vec![
+                0x30, 0x20, 0x10, 0xff, 0x03, 0x02, 0x01, 0x80, 0xcc, 0xbb, 0xaa, 0x40, 0x22, 0x11,
+                0x00, 0x20,
+            ])
+        );
         assert!(sink.publish_raw_frame(8, None).is_err());
     }
 
     #[test]
     fn native_camera_sink_requires_configured_format_when_ready() {
-        let mut sink = NativeCameraSinkState {
-            device_probe_available: true,
-            device_installed: true,
-            raw_frame_sink_ready: true,
-            width: 0,
-            height: 0,
-            fps: 0,
-            published_frame_count: 0,
-            last_frame_bytes: 0,
-        };
+        let mut sink = ready_native_sink(0, 0, 0);
 
         let error = sink.publish_raw_frame(7, Some(&[0; 16])).unwrap_err();
 
         assert!(error.contains("no output format"));
         assert_eq!(sink.published_frame_count, 0);
+        assert_eq!(sink.latest_bgra_frame(), None);
     }
 
     #[test]
     fn native_camera_sink_rejects_wrong_raw_frame_size() {
-        let mut sink = NativeCameraSinkState {
-            device_probe_available: true,
-            device_installed: true,
-            raw_frame_sink_ready: true,
-            width: 2,
-            height: 2,
-            fps: 30,
-            published_frame_count: 0,
-            last_frame_bytes: 0,
-        };
+        let mut sink = ready_native_sink(2, 2, 30);
 
         let error = sink.publish_raw_frame(7, Some(&[0; 15])).unwrap_err();
 
         assert!(error.contains("expected 16"));
         assert_eq!(sink.published_frame_count, 0);
+        assert_eq!(sink.latest_bgra_frame(), None);
     }
 
     #[test]
