@@ -42,6 +42,8 @@ The app already has the right producer side:
   source.
 - On Windows, the native module now has a Media Foundation backend wrapper that
   can query `MFIsVirtualCameraTypeSupported` for software virtual cameras.
+- Native status reports whether that backend probe succeeded and whether Media
+  Foundation says software virtual cameras are supported.
 - When raw-frame delivery is enabled, the native sink stores the latest BGRA
   frame snapshot, including frame index, resolution, fps, stride, Media
   Foundation 100ns sample timing, and bytes, for the future source to read.
@@ -102,6 +104,8 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
 - Keep `get_native_camera_status` read-only until there is a real device sink.
 - Show when the current Windows build is below the Media Foundation virtual
   camera API floor.
+- Show whether Media Foundation software virtual camera support is unavailable
+  or explicitly unsupported.
 - Show `MiiTuber Camera not installed yet` in the output diagnostics.
 - Show a separate "could not check" state if Windows camera probing fails.
 - Use the OBS path to finish the Phase 4 live proof.

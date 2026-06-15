@@ -218,6 +218,8 @@ type NativeCameraStatus = {
   platformSupported: boolean;
   windowsVirtualCameraApiSupported: boolean;
   windowsBuild: number | null;
+  backendProbeAvailable: boolean;
+  backendSupported: boolean;
   deviceProbeAvailable: boolean;
   deviceInstalled: boolean;
   rawFrameSinkReady: boolean;
@@ -475,6 +477,18 @@ function setNativeCameraStatus(status: NativeCameraStatus | null, error?: string
     debugNativeCameraEl.textContent = status.windowsBuild
       ? `Windows build ${status.windowsBuild} is below the native camera API floor.`
       : "Could not check Windows native camera API support.";
+    return;
+  }
+
+  if (status.platformSupported && !status.backendProbeAvailable) {
+    debugNativeCameraEl.textContent =
+      "Could not query Media Foundation virtual camera support.";
+    return;
+  }
+
+  if (status.platformSupported && !status.backendSupported) {
+    debugNativeCameraEl.textContent =
+      "Media Foundation virtual cameras are not supported here.";
     return;
   }
 

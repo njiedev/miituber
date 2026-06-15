@@ -1,9 +1,9 @@
 mod native_camera;
 
 use native_camera::{
-    native_camera_device_probe, native_camera_platform_probe, native_camera_status_from_sink,
-    start_native_camera_sink, stop_native_camera_sink, NativeCameraOutputConfig,
-    NativeCameraSinkState, NativeCameraStatus,
+    native_camera_backend_probe, native_camera_device_probe, native_camera_platform_probe,
+    native_camera_status_from_sink, start_native_camera_sink, stop_native_camera_sink,
+    NativeCameraOutputConfig, NativeCameraSinkState, NativeCameraStatus,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -466,10 +466,13 @@ async fn get_native_camera_status(
     native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
 ) -> Result<NativeCameraStatus, String> {
     let platform_probe = native_camera_platform_probe();
+    let backend_probe = native_camera_backend_probe();
     let device_probe = native_camera_device_probe();
     let native_sink = native_sink
         .lock()
         .map(|mut state| {
+            state.backend_probe_available = backend_probe.available;
+            state.backend_supported = backend_probe.supported;
             state.device_probe_available = device_probe.available;
             state.device_installed = device_probe.installed;
             if !state.device_installed {
@@ -1129,6 +1132,8 @@ mod tests {
         let mut sink = NativeCameraSinkState::default();
         sink.device_probe_available = true;
         sink.device_installed = true;
+        sink.backend_probe_available = true;
+        sink.backend_supported = true;
         sink.raw_frame_sink_ready = true;
         sink.width = width;
         sink.height = height;
@@ -1465,6 +1470,8 @@ mod tests {
     #[test]
     fn native_camera_status_reports_unavailable_probe_separately() {
         let mut sink = NativeCameraSinkState::default();
+        sink.backend_probe_available = true;
+        sink.backend_supported = true;
         sink.width = 1280;
         sink.height = 720;
         sink.fps = 30;
@@ -1476,6 +1483,39 @@ mod tests {
 
         #[cfg(target_os = "windows")]
         assert!(status.message.contains("Could not check"));
+    }
+
+    #[test]
+    fn native_camera_status_reports_unavailable_backend_probe() {
+        let mut sink = ready_native_sink(1280, 720, 30);
+        sink.backend_probe_available = false;
+        sink.backend_supported = false;
+        sink.device_installed = false;
+
+        let status = native_camera_status_from_sink(&sink, Some(22000), true);
+
+        assert!(!status.backend_probe_available);
+        assert!(!status.backend_supported);
+
+        #[cfg(target_os = "windows")]
+        assert!(status.message.contains("Could not query Media Foundation"));
+    }
+
+    #[test]
+    fn native_camera_status_reports_unsupported_backend() {
+        let mut sink = ready_native_sink(1280, 720, 30);
+        sink.backend_supported = false;
+        sink.device_installed = false;
+
+        let status = native_camera_status_from_sink(&sink, Some(22000), true);
+
+        assert!(status.backend_probe_available);
+        assert!(!status.backend_supported);
+
+        #[cfg(target_os = "windows")]
+        assert!(status
+            .message
+            .contains("software virtual cameras are not supported"));
     }
 
     #[test]

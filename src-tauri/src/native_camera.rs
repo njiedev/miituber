@@ -12,6 +12,8 @@ const MEDIA_TIME_UNITS_PER_SECOND: u64 = 10_000_000;
 pub(crate) struct NativeCameraSinkState {
     pub(crate) device_probe_available: bool,
     pub(crate) device_installed: bool,
+    pub(crate) backend_probe_available: bool,
+    pub(crate) backend_supported: bool,
     pub(crate) raw_frame_sink_ready: bool,
     pub(crate) width: u32,
     pub(crate) height: u32,
@@ -173,26 +175,41 @@ fn native_camera_sink_ready_for_config(
     config: NativeCameraOutputConfig,
 ) -> bool {
     let _ = (sink, config);
-    let _ = native_camera_backend_ready();
+    let _ = native_camera_backend_probe();
 
     false
 }
 
-fn native_camera_backend_ready() -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NativeCameraBackendProbe {
+    pub(crate) available: bool,
+    pub(crate) supported: bool,
+}
+
+pub(crate) fn native_camera_backend_probe() -> NativeCameraBackendProbe {
     #[cfg(target_os = "windows")]
     {
         match windows_backend::software_virtual_camera_type_supported() {
-            Ok(supported) => supported,
+            Ok(supported) => NativeCameraBackendProbe {
+                available: true,
+                supported,
+            },
             Err(error) => {
-                eprintln!("native_camera_backend_ready: {error}");
-                false
+                eprintln!("native_camera_backend_probe: {error}");
+                NativeCameraBackendProbe {
+                    available: false,
+                    supported: false,
+                }
             }
         }
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        false
+        NativeCameraBackendProbe {
+            available: false,
+            supported: false,
+        }
     }
 }
 
@@ -202,6 +219,8 @@ pub(crate) struct NativeCameraStatus {
     pub(crate) platform_supported: bool,
     pub(crate) windows_virtual_camera_api_supported: bool,
     pub(crate) windows_build: Option<u32>,
+    pub(crate) backend_probe_available: bool,
+    pub(crate) backend_supported: bool,
     pub(crate) device_probe_available: bool,
     pub(crate) device_installed: bool,
     pub(crate) raw_frame_sink_ready: bool,
@@ -240,6 +259,8 @@ pub(crate) fn native_camera_status_from_sink(
             platform_supported: true,
             windows_virtual_camera_api_supported,
             windows_build,
+            backend_probe_available: sink.backend_probe_available,
+            backend_supported: sink.backend_supported,
             device_probe_available: sink.device_probe_available,
             device_installed: sink.device_installed,
             raw_frame_sink_ready,
@@ -266,6 +287,8 @@ pub(crate) fn native_camera_status_from_sink(
             platform_supported: false,
             windows_virtual_camera_api_supported: false,
             windows_build: None,
+            backend_probe_available: false,
+            backend_supported: false,
             device_probe_available: false,
             device_installed: false,
             raw_frame_sink_ready: false,
@@ -338,6 +361,10 @@ fn native_camera_status_message(
             ),
             None => "Could not check whether this Windows version supports the native virtual camera API. Use the OBS Browser Source path for now.".to_string(),
         }
+    } else if !sink.backend_probe_available {
+        "Could not query Media Foundation software virtual camera support. Use the OBS Browser Source path for now.".to_string()
+    } else if !sink.backend_supported {
+        "Media Foundation reports software virtual cameras are not supported on this system. Use the OBS Browser Source path for now.".to_string()
     } else if !sink.device_probe_available {
         "Could not check whether the native Windows camera device is installed. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string()
     } else if sink.device_installed {
