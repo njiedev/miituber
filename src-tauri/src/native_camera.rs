@@ -1,4 +1,7 @@
 #[cfg(target_os = "windows")]
+mod windows_backend;
+
+#[cfg(target_os = "windows")]
 use std::process::Command;
 
 pub(crate) const NATIVE_CAMERA_DEVICE_NAME: &str = "MiiTuber Camera";
@@ -170,8 +173,27 @@ fn native_camera_sink_ready_for_config(
     config: NativeCameraOutputConfig,
 ) -> bool {
     let _ = (sink, config);
+    let _ = native_camera_backend_ready();
 
     false
+}
+
+fn native_camera_backend_ready() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        match windows_backend::software_virtual_camera_type_supported() {
+            Ok(supported) => supported,
+            Err(error) => {
+                eprintln!("native_camera_backend_ready: {error}");
+                false
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
 }
 
 #[derive(serde::Serialize)]
