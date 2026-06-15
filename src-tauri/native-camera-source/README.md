@@ -21,6 +21,9 @@ Current state:
 - The media source object supports `IUnknown`, `IMFMediaEventGenerator`, and
   `IMFMediaSource`, but its source/event methods still return `E_NOTIMPL` until
   descriptors, streams, and frame delivery exist.
+- The source object carries the first default video format contract:
+  stream id `1`, 1280x720, 30 fps, RGB32/BGRA-sized frames, 5120-byte stride,
+  3,686,400 bytes per frame, and 333,333 100ns units per sample.
 - Registration exports still return `E_NOTIMPL` so the DLL is not registered as
   a usable camera source before it can serve frames.
 

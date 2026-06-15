@@ -8,6 +8,12 @@ use std::{
 
 pub const MIITUBER_CAMERA_SOURCE_CLSID: &str = "{8F9F43F5-5B8C-4C4B-A8A9-26B4E58D2F8B}";
 
+const DEFAULT_WIDTH: u32 = 1280;
+const DEFAULT_HEIGHT: u32 = 720;
+const DEFAULT_FPS: u32 = 30;
+const MEDIA_TIME_UNITS_PER_SECOND: u64 = 10_000_000;
+const STREAM_ID: u32 = 1;
+
 const S_OK: i32 = 0x0000_0000;
 const S_FALSE: i32 = 0x0000_0001;
 const CLASS_E_CLASSNOTAVAILABLE: i32 = 0x8004_0111_u32 as i32;
@@ -60,6 +66,57 @@ const CLSID_MIITUBER_CAMERA_SOURCE: Guid = Guid {
     data4: [0xa8, 0xa9, 0x26, 0xb4, 0xe5, 0x8d, 0x2f, 0x8b],
 };
 
+const MFVIDEOFORMAT_RGB32: Guid = Guid {
+    data1: 0x0000_0016,
+    data2: 0x0000,
+    data3: 0x0010,
+    data4: [0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71],
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SourceVideoFormat {
+    stream_id: u32,
+    width: u32,
+    height: u32,
+    fps: u32,
+    subtype: Guid,
+}
+
+impl SourceVideoFormat {
+    const fn default_output() -> Self {
+        Self {
+            stream_id: STREAM_ID,
+            width: DEFAULT_WIDTH,
+            height: DEFAULT_HEIGHT,
+            fps: DEFAULT_FPS,
+            subtype: MFVIDEOFORMAT_RGB32,
+        }
+    }
+
+    fn stride_bytes(self) -> Result<usize, &'static str> {
+        let bytes = u64::from(self.width)
+            .checked_mul(4)
+            .ok_or("source stride overflowed")?;
+        usize::try_from(bytes).map_err(|_| "source stride is too large")
+    }
+
+    fn frame_len(self) -> Result<usize, &'static str> {
+        let bytes = u64::from(self.width)
+            .checked_mul(u64::from(self.height))
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or("source frame length overflowed")?;
+        usize::try_from(bytes).map_err(|_| "source frame length is too large")
+    }
+
+    fn sample_duration_100ns(self) -> Result<u64, &'static str> {
+        if self.fps == 0 {
+            return Err("source fps must be non-zero");
+        }
+
+        Ok(MEDIA_TIME_UNITS_PER_SECOND / u64::from(self.fps))
+    }
+}
+
 #[repr(C)]
 struct ClassFactory {
     vtable: &'static ClassFactoryVTable,
@@ -88,6 +145,7 @@ struct ClassFactoryVTable {
 struct MediaSource {
     vtable: &'static MediaSourceVTable,
     refs: AtomicU32,
+    format: SourceVideoFormat,
 }
 
 #[repr(C)]
@@ -279,6 +337,7 @@ unsafe extern "system" fn class_factory_create_instance(
     let source = Box::new(MediaSource {
         vtable: &MEDIA_SOURCE_VTABLE,
         refs: AtomicU32::new(1),
+        format: SourceVideoFormat::default_output(),
     });
     ACTIVE_COM_OBJECTS.fetch_add(1, Ordering::SeqCst);
     *object = Box::into_raw(source).cast::<c_void>();
@@ -441,9 +500,9 @@ fn is_media_source_interface(interface_id: Guid) -> bool {
 mod tests {
     use super::{
         ClassFactory, DllCanUnloadNow, DllGetClassObject, DllRegisterServer, DllUnregisterServer,
-        Guid, MediaSource, CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION,
+        Guid, MediaSource, SourceVideoFormat, CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION,
         CLSID_MIITUBER_CAMERA_SOURCE, E_NOINTERFACE, E_NOTIMPL, E_POINTER, IID_ICLASS_FACTORY,
-        IID_IMF_MEDIA_EVENT_GENERATOR, IID_IMF_MEDIA_SOURCE, IID_IUNKNOWN,
+        IID_IMF_MEDIA_EVENT_GENERATOR, IID_IMF_MEDIA_SOURCE, IID_IUNKNOWN, MFVIDEOFORMAT_RGB32,
         MIITUBER_CAMERA_SOURCE_CLSID, S_FALSE, S_OK,
     };
     use std::ffi::c_void;
@@ -464,6 +523,20 @@ mod tests {
         assert_eq!(CLSID_MIITUBER_CAMERA_SOURCE.data1, 0x8f9f_43f5);
         assert_eq!(CLSID_MIITUBER_CAMERA_SOURCE.data2, 0x5b8c);
         assert_eq!(CLSID_MIITUBER_CAMERA_SOURCE.data3, 0x4c4b);
+    }
+
+    #[test]
+    fn default_video_format_matches_tauri_bgra_output_contract() {
+        let format = SourceVideoFormat::default_output();
+
+        assert_eq!(format.stream_id, 1);
+        assert_eq!(format.width, 1280);
+        assert_eq!(format.height, 720);
+        assert_eq!(format.fps, 30);
+        assert_eq!(format.subtype, MFVIDEOFORMAT_RGB32);
+        assert_eq!(format.stride_bytes().unwrap(), 5120);
+        assert_eq!(format.frame_len().unwrap(), 3_686_400);
+        assert_eq!(format.sample_duration_100ns().unwrap(), 333_333);
     }
 
     #[test]
@@ -561,6 +634,10 @@ mod tests {
 
         assert_eq!(result, S_OK);
         assert!(!source.is_null());
+        let media_source = source.cast::<MediaSource>();
+        unsafe {
+            assert_eq!((*media_source).format, SourceVideoFormat::default_output());
+        }
         unsafe {
             release_media_source(source);
             release_factory(class_factory);
