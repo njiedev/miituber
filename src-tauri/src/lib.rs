@@ -432,6 +432,14 @@ async fn start_virtual_camera(
     validate_output_settings(request.width, request.height, request.fps)?;
     ensure_output_server_ready()?;
 
+    start_output_session(request, &state, &native_sink)
+}
+
+fn start_output_session(
+    request: StartVirtualCameraRequest,
+    state: &SharedVirtualCameraState,
+    native_sink: &SharedNativeCameraSinkState,
+) -> Result<VirtualCameraStatus, String> {
     let mut session = state
         .session
         .lock()
@@ -460,6 +468,13 @@ async fn start_virtual_camera(
 async fn stop_virtual_camera(
     state: tauri::State<'_, SharedVirtualCameraState>,
     native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
+) -> Result<VirtualCameraStatus, String> {
+    stop_output_session(&state, &native_sink)
+}
+
+fn stop_output_session(
+    state: &SharedVirtualCameraState,
+    native_sink: &SharedNativeCameraSinkState,
 ) -> Result<VirtualCameraStatus, String> {
     let mut session = state
         .session
@@ -1151,10 +1166,11 @@ mod tests {
         is_jpeg_frame, is_png_frame, latest_jpeg, latest_png, latest_rgba,
         native_camera_status_from_sink, normalize_mii_data_for_renderer,
         output_server_home_response_is_ours, output_session_is_running, publish_output_frame,
-        validate_rgba_frame, virtual_camera_status_from_session, NativeCameraSinkState,
+        start_output_session, stop_output_session, validate_rgba_frame,
+        virtual_camera_status_from_session, NativeCameraSinkState,
         PublishVirtualCameraFrameRequest, SharedNativeCameraSinkState, SharedVirtualCameraState,
-        VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS, OUTPUT_FRAME_URL,
-        OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
+        StartVirtualCameraRequest, VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS,
+        OUTPUT_FRAME_URL, OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
         OUTPUT_TRANSPARENT_SOURCE_URL, STUDIO_ENCODED_LEN, STUDIO_RAW_LEN, SWITCH_CHAR_INFO_LEN,
     };
 
@@ -1341,6 +1357,55 @@ mod tests {
 
         state.session.lock().unwrap().running = true;
         assert!(output_session_is_running(&state));
+    }
+
+    #[test]
+    fn start_output_session_configures_native_sink_format() {
+        let output_state = SharedVirtualCameraState::default();
+        let native_sink = SharedNativeCameraSinkState::default();
+
+        let status = start_output_session(
+            StartVirtualCameraRequest {
+                width: 1280,
+                height: 720,
+                fps: 30,
+            },
+            &output_state,
+            &native_sink,
+        )
+        .unwrap();
+
+        assert!(status.running);
+        assert_eq!(status.width, 1280);
+        assert_eq!(status.height, 720);
+        assert_eq!(status.fps, 30);
+
+        let sink = native_sink.lock().unwrap();
+        assert_eq!(sink.width, 1280);
+        assert_eq!(sink.height, 720);
+        assert_eq!(sink.fps, 30);
+    }
+
+    #[test]
+    fn stop_output_session_clears_native_sink_format_and_counters() {
+        let output_state = running_output_state(1280, 720, 30);
+        let native_sink = SharedNativeCameraSinkState::default();
+        {
+            let mut sink = native_sink.lock().unwrap();
+            sink.configure_output(1280, 720, 30);
+            sink.raw_frame_sink_ready = true;
+            sink.publish_raw_frame(12, Some(&[0; 16])).unwrap();
+        }
+
+        let status = stop_output_session(&output_state, &native_sink).unwrap();
+
+        assert!(!status.running);
+        let sink = native_sink.lock().unwrap();
+        assert_eq!(sink.width, 0);
+        assert_eq!(sink.height, 0);
+        assert_eq!(sink.fps, 0);
+        assert_eq!(sink.published_frame_count, 0);
+        assert_eq!(sink.last_frame_bytes, 0);
     }
 
     #[test]
