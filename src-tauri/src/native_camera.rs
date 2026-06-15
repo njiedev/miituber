@@ -5,7 +5,7 @@ mod windows_backend;
 use std::process::Command;
 
 pub(crate) const NATIVE_CAMERA_DEVICE_NAME: &str = "MiiTuber Camera";
-pub(crate) const NATIVE_CAMERA_SOURCE_ID: &str = "miituber.native-camera.source";
+pub(crate) const NATIVE_CAMERA_SOURCE_ID: &str = "{8F9F43F5-5B8C-4C4B-A8A9-26B4E58D2F8B}";
 const WINDOWS_VIRTUAL_CAMERA_MIN_BUILD: u32 = 22000;
 const MEDIA_TIME_UNITS_PER_SECOND: u64 = 10_000_000;
 

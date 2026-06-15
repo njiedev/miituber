@@ -73,6 +73,12 @@ impl WindowsVirtualCameraRegistrationStrings {
         if descriptor.source_id.trim().is_empty() {
             return Err("Native camera source id cannot be empty".to_string());
         }
+        if !is_braced_clsid_string(descriptor.source_id) {
+            return Err(
+                "Native camera source id must be a COM CLSID string like {00000000-0000-0000-0000-000000000000}"
+                    .to_string(),
+            );
+        }
 
         Ok(Self {
             friendly_name_wide: nul_terminated_utf16(descriptor.friendly_name),
@@ -85,10 +91,23 @@ fn nul_terminated_utf16(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+fn is_braced_clsid_string(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 38 || bytes.first() != Some(&b'{') || bytes.last() != Some(&b'}') {
+        return false;
+    }
+
+    bytes.iter().enumerate().all(|(index, byte)| {
+        matches!(index, 0 | 37)
+            || (matches!(index, 9 | 14 | 19 | 24) && *byte == b'-')
+            || (!matches!(index, 9 | 14 | 19 | 24) && byte.is_ascii_hexdigit())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        create_and_remove_session_virtual_camera, nul_terminated_utf16,
+        create_and_remove_session_virtual_camera, is_braced_clsid_string, nul_terminated_utf16,
         software_virtual_camera_type_supported, WindowsVirtualCameraRegistrationStrings,
     };
     use crate::native_camera::{
@@ -131,6 +150,30 @@ mod tests {
         };
 
         assert!(WindowsVirtualCameraRegistrationStrings::from_descriptor(&descriptor).is_err());
+    }
+
+    #[test]
+    fn rejects_non_clsid_source_id() {
+        let descriptor = NativeCameraRegistrationDescriptor {
+            friendly_name: NATIVE_CAMERA_DEVICE_NAME,
+            source_id: "miituber.native-camera.source",
+        };
+
+        assert!(WindowsVirtualCameraRegistrationStrings::from_descriptor(&descriptor).is_err());
+    }
+
+    #[test]
+    fn validates_braced_clsid_source_id_shape() {
+        assert!(is_braced_clsid_string(NATIVE_CAMERA_SOURCE_ID));
+        assert!(is_braced_clsid_string(
+            "{00000000-0000-0000-0000-000000000000}"
+        ));
+        assert!(!is_braced_clsid_string(
+            "00000000-0000-0000-0000-000000000000"
+        ));
+        assert!(!is_braced_clsid_string(
+            "{00000000-0000-0000-0000-00000000000Z}"
+        ));
     }
 
     #[test]

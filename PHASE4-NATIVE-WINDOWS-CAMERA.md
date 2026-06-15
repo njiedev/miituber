@@ -45,9 +45,9 @@ The app already has the right producer side:
 - Native status reports whether that backend probe succeeded and whether Media
   Foundation says software virtual cameras are supported.
 - Native camera registration identity is centralized as friendly name
-  `MiiTuber Camera` and source id `miituber.native-camera.source`; the Windows
-  backend converts those values to null-terminated UTF-16 for
-  `MFCreateVirtualCamera`.
+  `MiiTuber Camera` and source id `{8F9F43F5-5B8C-4C4B-A8A9-26B4E58D2F8B}`.
+  The source id is a COM CLSID string because `MFCreateVirtualCamera` uses it to
+  activate the custom Media Foundation source.
 - The Windows backend now has a guarded `MFCreateVirtualCamera` wrapper that can
   create and immediately remove a session-lifetime, current-user virtual camera
   registration for `MiiTuber Camera`. The automated test is ignored by default
@@ -101,7 +101,8 @@ The native camera will likely need one of these approaches:
   for Windows 11 build 22000+ because Microsoft documents it as a user-mode
   virtual camera path. The current backend wrapper probes API support, prepares
   stable registration strings, and exposes an ignored create/remove registration
-  proof, but does not start a frame-producing camera source yet.
+  proof, but does not start a frame-producing camera source yet. The `sourceId`
+  must be the registered CLSID of that source, not an arbitrary app identifier.
 - DirectShow virtual source filter, older but widely supported by conferencing
   apps and a possible fallback if Windows 10 support becomes necessary.
 
@@ -120,7 +121,8 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
 - Use the OBS path to finish the Phase 4 live proof.
 - Then replace the dormant lifecycle hook with actual Windows camera
   registration/start/stop work. The first guarded registration wrapper exists;
-  the next step is a real Media Foundation source that can serve BGRA samples.
+  the next step is a registered Media Foundation source class that can serve BGRA
+  samples when Windows activates the CLSID.
 
 ## Acceptance Proof
 
