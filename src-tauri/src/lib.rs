@@ -2,8 +2,8 @@ mod native_camera;
 
 use native_camera::{
     native_camera_backend_probe, native_camera_device_probe, native_camera_platform_probe,
-    native_camera_status_from_sink, start_native_camera_sink, stop_native_camera_sink,
-    NativeCameraOutputConfig, NativeCameraSinkState, NativeCameraStatus,
+    native_camera_source_probe, native_camera_status_from_sink, start_native_camera_sink,
+    stop_native_camera_sink, NativeCameraOutputConfig, NativeCameraSinkState, NativeCameraStatus,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -467,15 +467,18 @@ async fn get_native_camera_status(
 ) -> Result<NativeCameraStatus, String> {
     let platform_probe = native_camera_platform_probe();
     let backend_probe = native_camera_backend_probe();
+    let source_probe = native_camera_source_probe();
     let device_probe = native_camera_device_probe();
     let native_sink = native_sink
         .lock()
         .map(|mut state| {
             state.backend_probe_available = backend_probe.available;
             state.backend_supported = backend_probe.supported;
+            state.source_probe_available = source_probe.available;
+            state.source_registered = source_probe.registered;
             state.device_probe_available = device_probe.available;
             state.device_installed = device_probe.installed;
-            if !state.device_installed {
+            if !state.source_registered || !state.device_installed {
                 state.raw_frame_sink_ready = false;
             }
             state.clone()
@@ -1079,7 +1082,7 @@ mod tests {
     use super::native_camera::{
         native_camera_bgra_stride_bytes, native_camera_device_list_contains_miituber,
         native_camera_registration_descriptor, native_camera_sample_duration_100ns,
-        native_camera_sample_time_100ns, native_camera_status_from_sink,
+        native_camera_sample_time_100ns, native_camera_status_from_sink, parse_powershell_bool,
         parse_windows_build_number, rgba_to_bgra_frame, start_native_camera_sink,
         stop_native_camera_sink, NativeCameraOutputConfig, NativeCameraSinkState,
         NATIVE_CAMERA_DEVICE_NAME, NATIVE_CAMERA_SOURCE_ID,
@@ -1135,6 +1138,8 @@ mod tests {
         sink.device_installed = true;
         sink.backend_probe_available = true;
         sink.backend_supported = true;
+        sink.source_probe_available = true;
+        sink.source_registered = true;
         sink.raw_frame_sink_ready = true;
         sink.width = width;
         sink.height = height;
@@ -1528,6 +1533,41 @@ mod tests {
     }
 
     #[test]
+    fn native_camera_status_reports_unavailable_source_probe() {
+        let mut sink = ready_native_sink(1280, 720, 30);
+        sink.source_probe_available = false;
+        sink.source_registered = false;
+        sink.device_installed = false;
+
+        let status = native_camera_status_from_sink(&sink, Some(22000), true);
+
+        assert!(!status.source_probe_available);
+        assert!(!status.source_registered);
+
+        #[cfg(target_os = "windows")]
+        assert!(status
+            .message
+            .contains("Could not check whether the MiiTuber Media Foundation source CLSID"));
+    }
+
+    #[test]
+    fn native_camera_status_reports_unregistered_source() {
+        let mut sink = ready_native_sink(1280, 720, 30);
+        sink.source_registered = false;
+        sink.device_installed = false;
+
+        let status = native_camera_status_from_sink(&sink, Some(22000), true);
+
+        assert!(status.source_probe_available);
+        assert!(!status.source_registered);
+
+        #[cfg(target_os = "windows")]
+        assert!(status
+            .message
+            .contains("Media Foundation source CLSID is not registered"));
+    }
+
+    #[test]
     fn native_camera_status_reports_unsupported_windows_build() {
         let status =
             native_camera_status_from_sink(&NativeCameraSinkState::default(), Some(19045), false);
@@ -1546,6 +1586,13 @@ mod tests {
         assert_eq!(parse_windows_build_number("22631\r\n"), Some(22631));
         assert_eq!(parse_windows_build_number("\r\n22000\r\n"), Some(22000));
         assert_eq!(parse_windows_build_number("not a build"), None);
+    }
+
+    #[test]
+    fn parses_powershell_bool_output() {
+        assert_eq!(parse_powershell_bool("True\r\n"), Some(true));
+        assert_eq!(parse_powershell_bool("\r\nFalse\r\n"), Some(false));
+        assert_eq!(parse_powershell_bool("not bool"), None);
     }
 
     #[test]

@@ -63,3 +63,4 @@
 - Chose to expose Media Foundation backend probe state in native camera status because OS build support, backend API support, and installed device presence fail for different reasons.
 - Chose session lifetime/current-user registration for the first `MFCreateVirtualCamera` wrapper because it minimizes persistent OS state while testing whether Windows accepts the app's camera identity.
 - Chose a stable COM CLSID string for the native camera source id because `MFCreateVirtualCamera` requires `sourceId` to identify the custom Media Foundation source class, not an arbitrary app slug.
+- Chose a separate native camera source-registration probe because `MFCreateVirtualCamera` can only expose a useful camera after Windows can activate the CLSID-backed Media Foundation source.

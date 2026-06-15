@@ -15,6 +15,8 @@ pub(crate) struct NativeCameraSinkState {
     pub(crate) device_installed: bool,
     pub(crate) backend_probe_available: bool,
     pub(crate) backend_supported: bool,
+    pub(crate) source_probe_available: bool,
+    pub(crate) source_registered: bool,
     pub(crate) raw_frame_sink_ready: bool,
     pub(crate) width: u32,
     pub(crate) height: u32,
@@ -190,6 +192,7 @@ fn native_camera_sink_ready_for_config(
 ) -> bool {
     let _ = (sink, config);
     let _ = native_camera_backend_probe();
+    let _ = native_camera_source_probe();
     let _ = native_camera_registration_ready();
 
     false
@@ -248,6 +251,39 @@ pub(crate) fn native_camera_backend_probe() -> NativeCameraBackendProbe {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NativeCameraSourceProbe {
+    pub(crate) available: bool,
+    pub(crate) registered: bool,
+}
+
+pub(crate) fn native_camera_source_probe() -> NativeCameraSourceProbe {
+    #[cfg(target_os = "windows")]
+    {
+        match native_camera_windows_source_registered() {
+            Ok(registered) => NativeCameraSourceProbe {
+                available: true,
+                registered,
+            },
+            Err(error) => {
+                eprintln!("native_camera_source_probe: {error}");
+                NativeCameraSourceProbe {
+                    available: false,
+                    registered: false,
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        NativeCameraSourceProbe {
+            available: false,
+            registered: false,
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NativeCameraStatus {
@@ -256,6 +292,8 @@ pub(crate) struct NativeCameraStatus {
     pub(crate) windows_build: Option<u32>,
     pub(crate) backend_probe_available: bool,
     pub(crate) backend_supported: bool,
+    pub(crate) source_probe_available: bool,
+    pub(crate) source_registered: bool,
     pub(crate) device_probe_available: bool,
     pub(crate) device_installed: bool,
     pub(crate) raw_frame_sink_ready: bool,
@@ -296,6 +334,8 @@ pub(crate) fn native_camera_status_from_sink(
             windows_build,
             backend_probe_available: sink.backend_probe_available,
             backend_supported: sink.backend_supported,
+            source_probe_available: sink.source_probe_available,
+            source_registered: sink.source_registered,
             device_probe_available: sink.device_probe_available,
             device_installed: sink.device_installed,
             raw_frame_sink_ready,
@@ -324,6 +364,8 @@ pub(crate) fn native_camera_status_from_sink(
             windows_build: None,
             backend_probe_available: false,
             backend_supported: false,
+            source_probe_available: false,
+            source_registered: false,
             device_probe_available: false,
             device_installed: false,
             raw_frame_sink_ready: false,
@@ -400,6 +442,10 @@ fn native_camera_status_message(
         "Could not query Media Foundation software virtual camera support. Use the OBS Browser Source path for now.".to_string()
     } else if !sink.backend_supported {
         "Media Foundation reports software virtual cameras are not supported on this system. Use the OBS Browser Source path for now.".to_string()
+    } else if !sink.source_probe_available {
+        "Could not check whether the MiiTuber Media Foundation source CLSID is registered. Use the OBS Browser Source path for now.".to_string()
+    } else if !sink.source_registered {
+        "MiiTuber Media Foundation source CLSID is not registered yet. Use the OBS Browser Source path for now; native camera work still needs the source class.".to_string()
     } else if !sink.device_probe_available {
         "Could not check whether the native Windows camera device is installed. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string()
     } else if sink.device_installed {
@@ -452,6 +498,31 @@ pub(crate) fn native_camera_device_probe() -> NativeCameraDeviceProbe {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn native_camera_windows_source_registered() -> Result<bool, String> {
+    let escaped_source_id = NATIVE_CAMERA_SOURCE_ID.replace('\'', "''");
+    let script = format!(
+        "Test-Path -LiteralPath 'Registry::HKEY_CLASSES_ROOT\\CLSID\\{escaped_source_id}\\InprocServer32'"
+    );
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Ok(parse_powershell_bool(&stdout).unwrap_or(false))
+        }
+        Ok(output) => Err(format!(
+            "PowerShell exited with status {:?} while checking source CLSID registration",
+            output.status.code()
+        )),
+        Err(error) => Err(format!(
+            "could not run PowerShell while checking source CLSID registration: {error}"
+        )),
+    }
+}
+
 pub(crate) fn native_camera_device_list_contains_miituber(device_list: &str) -> bool {
     device_list
         .lines()
@@ -460,4 +531,12 @@ pub(crate) fn native_camera_device_list_contains_miituber(device_list: &str) -> 
 
 pub(crate) fn parse_windows_build_number(output: &str) -> Option<u32> {
     output.lines().find_map(|line| line.trim().parse().ok())
+}
+
+pub(crate) fn parse_powershell_bool(output: &str) -> Option<bool> {
+    output.lines().find_map(|line| match line.trim() {
+        "True" | "true" => Some(true),
+        "False" | "false" => Some(false),
+        _ => None,
+    })
 }

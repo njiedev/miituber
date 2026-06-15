@@ -52,6 +52,10 @@ The app already has the right producer side:
   create and immediately remove a session-lifetime, current-user virtual camera
   registration for `MiiTuber Camera`. The automated test is ignored by default
   because it touches OS camera registration state.
+- Native status now probes whether the source CLSID is registered under
+  `HKEY_CLASSES_ROOT\CLSID\{8F9F43F5-5B8C-4C4B-A8A9-26B4E58D2F8B}\InprocServer32`.
+  This is separate from device probing because the COM source class must exist
+  before Windows can activate the virtual camera source.
 - When raw-frame delivery is enabled, the native sink stores the latest BGRA
   frame snapshot, including frame index, resolution, fps, stride, Media
   Foundation 100ns sample timing, and bytes, for the future source to read.
@@ -116,13 +120,14 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
   camera API floor.
 - Show whether Media Foundation software virtual camera support is unavailable
   or explicitly unsupported.
+- Show whether the MiiTuber Media Foundation source CLSID is not registered yet.
 - Show `MiiTuber Camera not installed yet` in the output diagnostics.
 - Show a separate "could not check" state if Windows camera probing fails.
 - Use the OBS path to finish the Phase 4 live proof.
 - Then replace the dormant lifecycle hook with actual Windows camera
   registration/start/stop work. The first guarded registration wrapper exists;
-  the next step is a registered Media Foundation source class that can serve BGRA
-  samples when Windows activates the CLSID.
+  the next step is implementing and registering the Media Foundation source class
+  that can serve BGRA samples when Windows activates the CLSID.
 
 ## Acceptance Proof
 

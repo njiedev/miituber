@@ -220,6 +220,8 @@ type NativeCameraStatus = {
   windowsBuild: number | null;
   backendProbeAvailable: boolean;
   backendSupported: boolean;
+  sourceProbeAvailable: boolean;
+  sourceRegistered: boolean;
   deviceProbeAvailable: boolean;
   deviceInstalled: boolean;
   rawFrameSinkReady: boolean;
@@ -489,6 +491,18 @@ function setNativeCameraStatus(status: NativeCameraStatus | null, error?: string
   if (status.platformSupported && !status.backendSupported) {
     debugNativeCameraEl.textContent =
       "Media Foundation virtual cameras are not supported here.";
+    return;
+  }
+
+  if (status.platformSupported && !status.sourceProbeAvailable) {
+    debugNativeCameraEl.textContent =
+      "Could not check MiiTuber Media Foundation source registration.";
+    return;
+  }
+
+  if (status.platformSupported && !status.sourceRegistered) {
+    debugNativeCameraEl.textContent =
+      "MiiTuber Media Foundation source is not registered yet.";
     return;
   }
 
