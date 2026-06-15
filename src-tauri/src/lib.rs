@@ -481,6 +481,14 @@ async fn publish_virtual_camera_frame(
     state: tauri::State<'_, SharedVirtualCameraState>,
     native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
 ) -> Result<VirtualCameraStatus, String> {
+    publish_output_frame(request, &state, &native_sink)
+}
+
+fn publish_output_frame(
+    request: PublishVirtualCameraFrameRequest,
+    state: &SharedVirtualCameraState,
+    native_sink: &SharedNativeCameraSinkState,
+) -> Result<VirtualCameraStatus, String> {
     if !is_jpeg_frame(&request.jpeg_bytes) {
         return Err("Output frame was not a JPEG image".to_string());
     }
@@ -1101,12 +1109,46 @@ mod tests {
         calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
         is_jpeg_frame, is_png_frame, latest_jpeg, latest_png, latest_rgba,
         native_camera_status_from_sink, normalize_mii_data_for_renderer,
-        output_server_home_response_is_ours, output_session_is_running, validate_rgba_frame,
-        virtual_camera_status_from_session, NativeCameraSinkState, SharedVirtualCameraState,
+        output_server_home_response_is_ours, output_session_is_running, publish_output_frame,
+        validate_rgba_frame, virtual_camera_status_from_session, NativeCameraSinkState,
+        PublishVirtualCameraFrameRequest, SharedNativeCameraSinkState, SharedVirtualCameraState,
         VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS, OUTPUT_FRAME_URL,
         OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
         OUTPUT_TRANSPARENT_SOURCE_URL, STUDIO_ENCODED_LEN, STUDIO_RAW_LEN, SWITCH_CHAR_INFO_LEN,
     };
+
+    fn running_output_state(width: u32, height: u32, fps: u32) -> SharedVirtualCameraState {
+        let state = SharedVirtualCameraState::default();
+        {
+            let mut session = state.session.lock().unwrap();
+            session.running = true;
+            session.width = width;
+            session.height = height;
+            session.fps = fps;
+            session.frame_url = OUTPUT_FRAME_URL.to_string();
+            session.png_frame_url = OUTPUT_PNG_FRAME_URL.to_string();
+            session.mjpeg_url = OUTPUT_MJPEG_URL.to_string();
+            session.transparent_source_url = OUTPUT_TRANSPARENT_SOURCE_URL.to_string();
+        }
+        state
+    }
+
+    fn output_frame_request(
+        width: u32,
+        height: u32,
+        frame_index: u64,
+        rgba_bytes: Option<Vec<u8>>,
+    ) -> PublishVirtualCameraFrameRequest {
+        PublishVirtualCameraFrameRequest {
+            width,
+            height,
+            fps: 30,
+            frame_index,
+            jpeg_bytes: vec![0xff, 0xd8, 0xff, 0xe0],
+            png_bytes: None,
+            rgba_bytes,
+        }
+    }
 
     #[test]
     fn accepts_supported_mii_data_lengths() {
@@ -1367,6 +1409,49 @@ mod tests {
         assert_eq!(sink.published_frame_count, 7);
         assert_eq!(sink.last_frame_bytes, 16);
         assert!(sink.publish_raw_frame(8, None).is_err());
+    }
+
+    #[test]
+    fn publish_output_frame_hands_raw_frame_to_ready_native_sink() {
+        let output_state = running_output_state(2, 2, 30);
+        let native_sink = SharedNativeCameraSinkState::default();
+        {
+            let mut sink = native_sink.lock().unwrap();
+            sink.device_installed = true;
+            sink.raw_frame_sink_ready = true;
+        }
+
+        let status = publish_output_frame(
+            output_frame_request(2, 2, 7, Some(vec![0; 16])),
+            &output_state,
+            &native_sink,
+        )
+        .unwrap();
+
+        assert_eq!(status.frame_count, 7);
+        assert_eq!(status.last_rgba_frame_bytes, 16);
+        let sink = native_sink.lock().unwrap();
+        assert_eq!(sink.published_frame_count, 7);
+        assert_eq!(sink.last_frame_bytes, 16);
+    }
+
+    #[test]
+    fn publish_output_frame_requires_raw_frame_when_native_sink_is_ready() {
+        let output_state = running_output_state(2, 2, 30);
+        let native_sink = SharedNativeCameraSinkState::default();
+        native_sink.lock().unwrap().raw_frame_sink_ready = true;
+
+        let error = match publish_output_frame(
+            output_frame_request(2, 2, 7, None),
+            &output_state,
+            &native_sink,
+        ) {
+            Ok(_) => panic!("expected missing raw frame to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("no raw RGBA frame"));
+        assert_eq!(output_state.session.lock().unwrap().frame_count, 0);
     }
 
     #[test]
