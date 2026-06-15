@@ -19,6 +19,8 @@ The app already has the right producer side:
   detection and raw-frame sink readiness.
 - On Windows, `get_native_camera_status` probes local PnP camera/media/image
   friendly names and marks `deviceInstalled` when `MiiTuber Camera` exists.
+- The native status also reports `deviceProbeAvailable` so a failed Windows
+  device query is not presented as "camera not installed."
 - Raw-frame readiness is reported only when both the device is installed and the
   native sink says it is ready.
 - Start Output configures `NativeCameraSinkState` with the current width,
@@ -71,6 +73,7 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
 
 - Keep `get_native_camera_status` read-only until there is a real device sink.
 - Show `MiiTuber Camera not installed yet` in the output diagnostics.
+- Show a separate "could not check" state if Windows camera probing fails.
 - Use the OBS path to finish the Phase 4 live proof.
 - Then replace the placeholder status with actual Windows device detection and
   start/stop hooks.

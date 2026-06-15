@@ -216,6 +216,7 @@ type VirtualCameraStatus = {
 
 type NativeCameraStatus = {
   platformSupported: boolean;
+  deviceProbeAvailable: boolean;
   deviceInstalled: boolean;
   rawFrameSinkReady: boolean;
   width: number;
@@ -465,6 +466,11 @@ function setNativeCameraStatus(status: NativeCameraStatus | null, error?: string
 
   if (!status) {
     debugNativeCameraEl.textContent = "Not checked.";
+    return;
+  }
+
+  if (status.platformSupported && !status.deviceProbeAvailable) {
+    debugNativeCameraEl.textContent = `Could not check ${status.deviceName} device.`;
     return;
   }
 

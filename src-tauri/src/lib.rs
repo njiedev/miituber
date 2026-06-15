@@ -45,6 +45,7 @@ type SharedRenderCache = Arc<RenderCache>;
 
 #[derive(Default)]
 struct NativeCameraSinkState {
+    device_probe_available: bool,
     device_installed: bool,
     raw_frame_sink_ready: bool,
     width: u32,
@@ -236,6 +237,7 @@ struct VirtualCameraStatus {
 #[serde(rename_all = "camelCase")]
 struct NativeCameraStatus {
     platform_supported: bool,
+    device_probe_available: bool,
     device_installed: bool,
     raw_frame_sink_ready: bool,
     width: u32,
@@ -250,6 +252,12 @@ struct NativeCameraStatus {
 type SharedVirtualCameraState = Arc<VirtualCameraState>;
 
 static OUTPUT_SERVER_STARTED: OnceLock<()> = OnceLock::new();
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NativeCameraDeviceProbe {
+    available: bool,
+    installed: bool,
+}
 
 #[derive(Debug)]
 struct RendererPayload {
@@ -531,15 +539,17 @@ async fn get_virtual_camera_status(
 async fn get_native_camera_status(
     native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
 ) -> Result<NativeCameraStatus, String> {
-    let device_installed = native_camera_device_installed();
+    let device_probe = native_camera_device_probe();
     let native_sink = native_sink
         .lock()
         .map(|mut state| {
-            state.device_installed = device_installed;
+            state.device_probe_available = device_probe.available;
+            state.device_installed = device_probe.installed;
             if !state.device_installed {
                 state.raw_frame_sink_ready = false;
             }
             NativeCameraSinkState {
+                device_probe_available: state.device_probe_available,
                 device_installed: state.device_installed,
                 raw_frame_sink_ready: state.raw_frame_sink_ready,
                 width: state.width,
@@ -653,6 +663,7 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
     {
         NativeCameraStatus {
             platform_supported: true,
+            device_probe_available: sink.device_probe_available,
             device_installed: sink.device_installed,
             raw_frame_sink_ready,
             width: sink.width,
@@ -669,6 +680,7 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
     {
         NativeCameraStatus {
             platform_supported: false,
+            device_probe_available: false,
             device_installed: false,
             raw_frame_sink_ready: false,
             width: 0,
@@ -691,6 +703,8 @@ fn native_camera_status_message(
 ) -> String {
     if raw_frame_sink_ready {
         "Native Windows camera sink is ready for raw frames.".to_string()
+    } else if !sink.device_probe_available {
+        "Could not check whether the native Windows camera device is installed. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string()
     } else if sink.device_installed {
         "Native Windows camera device is installed, but the frame sink is not ready yet. Use the OBS Browser Source path for now.".to_string()
     } else {
@@ -699,7 +713,7 @@ fn native_camera_status_message(
 }
 
 #[cfg(target_os = "windows")]
-fn native_camera_device_installed() -> bool {
+fn native_camera_device_probe() -> NativeCameraDeviceProbe {
     let script = "Get-PnpDevice -Class Camera,Image,Media -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FriendlyName";
     let output = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
@@ -708,25 +722,37 @@ fn native_camera_device_installed() -> bool {
     match output {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            native_camera_device_list_contains_miituber(&stdout)
+            NativeCameraDeviceProbe {
+                available: true,
+                installed: native_camera_device_list_contains_miituber(&stdout),
+            }
         }
         Ok(output) => {
             eprintln!(
-                "native_camera_device_installed: PowerShell exited with status {:?}",
+                "native_camera_device_probe: PowerShell exited with status {:?}",
                 output.status.code()
             );
-            false
+            NativeCameraDeviceProbe {
+                available: false,
+                installed: false,
+            }
         }
         Err(error) => {
-            eprintln!("native_camera_device_installed: could not run PowerShell: {error}");
-            false
+            eprintln!("native_camera_device_probe: could not run PowerShell: {error}");
+            NativeCameraDeviceProbe {
+                available: false,
+                installed: false,
+            }
         }
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn native_camera_device_installed() -> bool {
-    false
+fn native_camera_device_probe() -> NativeCameraDeviceProbe {
+    NativeCameraDeviceProbe {
+        available: false,
+        installed: false,
+    }
 }
 
 fn native_camera_device_list_contains_miituber(device_list: &str) -> bool {
@@ -1530,6 +1556,7 @@ mod tests {
         let status = native_camera_status_from_sink(&NativeCameraSinkState::default());
 
         assert_eq!(status.device_name, "MiiTuber Camera");
+        assert!(!status.device_probe_available);
         assert!(!status.device_installed);
         assert!(!status.raw_frame_sink_ready);
         assert!(status.message.contains("OBS") || status.message.contains("Windows"));
@@ -1556,6 +1583,7 @@ mod tests {
     #[test]
     fn native_camera_status_reflects_sink_readiness() {
         let status = native_camera_status_from_sink(&NativeCameraSinkState {
+            device_probe_available: true,
             device_installed: true,
             raw_frame_sink_ready: true,
             width: 1280,
@@ -1570,6 +1598,7 @@ mod tests {
         #[cfg(target_os = "windows")]
         {
             assert!(status.platform_supported);
+            assert!(status.device_probe_available);
             assert!(status.device_installed);
             assert!(status.raw_frame_sink_ready);
         }
@@ -1585,6 +1614,7 @@ mod tests {
     #[test]
     fn native_camera_status_does_not_report_ready_without_device() {
         let status = native_camera_status_from_sink(&NativeCameraSinkState {
+            device_probe_available: true,
             device_installed: false,
             raw_frame_sink_ready: true,
             width: 1280,
@@ -1596,6 +1626,26 @@ mod tests {
 
         assert!(!status.device_installed);
         assert!(!status.raw_frame_sink_ready);
+    }
+
+    #[test]
+    fn native_camera_status_reports_unavailable_probe_separately() {
+        let status = native_camera_status_from_sink(&NativeCameraSinkState {
+            device_probe_available: false,
+            device_installed: false,
+            raw_frame_sink_ready: false,
+            width: 1280,
+            height: 720,
+            fps: 30,
+            published_frame_count: 0,
+            last_frame_bytes: 0,
+        });
+
+        assert!(!status.device_probe_available);
+        assert!(!status.device_installed);
+
+        #[cfg(target_os = "windows")]
+        assert!(status.message.contains("Could not check"));
     }
 
     #[test]
@@ -1631,6 +1681,7 @@ mod tests {
     #[test]
     fn native_camera_sink_counts_raw_frames_when_ready() {
         let mut sink = NativeCameraSinkState {
+            device_probe_available: true,
             device_installed: true,
             raw_frame_sink_ready: true,
             width: 2,
@@ -1650,6 +1701,7 @@ mod tests {
     #[test]
     fn native_camera_sink_requires_configured_format_when_ready() {
         let mut sink = NativeCameraSinkState {
+            device_probe_available: true,
             device_installed: true,
             raw_frame_sink_ready: true,
             width: 0,
@@ -1668,6 +1720,7 @@ mod tests {
     #[test]
     fn native_camera_sink_rejects_wrong_raw_frame_size() {
         let mut sink = NativeCameraSinkState {
+            device_probe_available: true,
             device_installed: true,
             raw_frame_sink_ready: true,
             width: 2,
