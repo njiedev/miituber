@@ -218,6 +218,9 @@ type NativeCameraStatus = {
   platformSupported: boolean;
   deviceInstalled: boolean;
   rawFrameSinkReady: boolean;
+  width: number;
+  height: number;
+  fps: number;
   publishedFrameCount: number;
   lastFrameBytes: number;
   deviceName: string;
@@ -467,7 +470,7 @@ function setNativeCameraStatus(status: NativeCameraStatus | null, error?: string
 
   if (status.deviceInstalled) {
     debugNativeCameraEl.textContent = status.rawFrameSinkReady
-      ? `${status.deviceName} ready, ${status.publishedFrameCount} raw frames, ${formatBytes(status.lastFrameBytes)} last.`
+      ? `${status.deviceName} ready, ${formatNativeCameraTarget(status)}, ${status.publishedFrameCount} raw frames, ${formatBytes(status.lastFrameBytes)} last.`
       : `${status.deviceName} installed, sink not ready.`;
     return;
   }
@@ -1471,6 +1474,14 @@ function formatBytes(bytes: number) {
   const kib = bytes / 1024;
   if (kib < 1024) return `${kib.toFixed(1)} KiB`;
   return `${(kib / 1024).toFixed(1)} MiB`;
+}
+
+function formatNativeCameraTarget(status: NativeCameraStatus) {
+  if (status.width <= 0 || status.height <= 0 || status.fps <= 0) {
+    return "no output target";
+  }
+
+  return `${status.width} x ${status.height} @ ${status.fps}`;
 }
 
 function updateOutputTransparencyUi() {

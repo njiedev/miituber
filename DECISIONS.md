@@ -46,3 +46,4 @@
 - Chose to gate raw RGBA capture on native sink readiness because the OBS path should not pay the bandwidth cost for frames no installed camera device consumes.
 - Chose a managed `NativeCameraSinkState` because Windows device detection and raw-frame readiness need explicit state before real camera sink lifecycle code lands.
 - Chose to route published raw frames through `NativeCameraSinkState` because the future Windows camera implementation should replace one handoff hook, not thread driver calls through the OBS HTTP server.
+- Chose to configure the native sink on Start Output because a Windows camera sink needs the active width, height, and fps before accepting raw frames.

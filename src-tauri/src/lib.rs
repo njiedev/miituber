@@ -44,11 +44,30 @@ type SharedRenderCache = Arc<RenderCache>;
 struct NativeCameraSinkState {
     device_installed: bool,
     raw_frame_sink_ready: bool,
+    width: u32,
+    height: u32,
+    fps: u32,
     published_frame_count: u64,
     last_frame_bytes: usize,
 }
 
 impl NativeCameraSinkState {
+    fn configure_output(&mut self, width: u32, height: u32, fps: u32) {
+        self.width = width;
+        self.height = height;
+        self.fps = fps;
+        self.published_frame_count = 0;
+        self.last_frame_bytes = 0;
+    }
+
+    fn clear_output(&mut self) {
+        self.width = 0;
+        self.height = 0;
+        self.fps = 0;
+        self.published_frame_count = 0;
+        self.last_frame_bytes = 0;
+    }
+
     fn publish_raw_frame(
         &mut self,
         frame_index: u64,
@@ -197,6 +216,9 @@ struct NativeCameraStatus {
     platform_supported: bool,
     device_installed: bool,
     raw_frame_sink_ready: bool,
+    width: u32,
+    height: u32,
+    fps: u32,
     published_frame_count: u64,
     last_frame_bytes: usize,
     device_name: String,
@@ -405,6 +427,7 @@ async fn check_renderer_status() -> RendererStatus {
 async fn start_virtual_camera(
     request: StartVirtualCameraRequest,
     state: tauri::State<'_, SharedVirtualCameraState>,
+    native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
 ) -> Result<VirtualCameraStatus, String> {
     validate_output_settings(request.width, request.height, request.fps)?;
     ensure_output_server_ready()?;
@@ -424,6 +447,10 @@ async fn start_virtual_camera(
     session.png_frame_url = OUTPUT_PNG_FRAME_URL.to_string();
     session.mjpeg_url = OUTPUT_MJPEG_URL.to_string();
     session.transparent_source_url = OUTPUT_TRANSPARENT_SOURCE_URL.to_string();
+    native_sink
+        .lock()
+        .map_err(|_| "Native camera sink state lock failed".to_string())?
+        .configure_output(request.width, request.height, request.fps);
     clear_latest_output_frame(&state)?;
 
     Ok(virtual_camera_status_from_session(&session))
@@ -432,6 +459,7 @@ async fn start_virtual_camera(
 #[tauri::command]
 async fn stop_virtual_camera(
     state: tauri::State<'_, SharedVirtualCameraState>,
+    native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
 ) -> Result<VirtualCameraStatus, String> {
     let mut session = state
         .session
@@ -441,6 +469,10 @@ async fn stop_virtual_camera(
     session.frame_count = 0;
     session.last_frame_bytes = 0;
     session.last_rgba_frame_bytes = 0;
+    native_sink
+        .lock()
+        .map_err(|_| "Native camera sink state lock failed".to_string())?
+        .clear_output();
     clear_latest_output_frame(&state)?;
 
     Ok(virtual_camera_status_from_session(&session))
@@ -467,6 +499,9 @@ async fn get_native_camera_status(
         .map(|state| NativeCameraSinkState {
             device_installed: state.device_installed,
             raw_frame_sink_ready: state.raw_frame_sink_ready,
+            width: state.width,
+            height: state.height,
+            fps: state.fps,
             published_frame_count: state.published_frame_count,
             last_frame_bytes: state.last_frame_bytes,
         })
@@ -575,6 +610,9 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
             platform_supported: true,
             device_installed: sink.device_installed,
             raw_frame_sink_ready: sink.raw_frame_sink_ready,
+            width: sink.width,
+            height: sink.height,
+            fps: sink.fps,
             published_frame_count: sink.published_frame_count,
             last_frame_bytes: sink.last_frame_bytes,
             device_name,
@@ -588,6 +626,9 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
             platform_supported: false,
             device_installed: false,
             raw_frame_sink_ready: false,
+            width: 0,
+            height: 0,
+            fps: 0,
             published_frame_count: 0,
             last_frame_bytes: 0,
             device_name,
@@ -1364,6 +1405,9 @@ mod tests {
         let status = native_camera_status_from_sink(&NativeCameraSinkState {
             device_installed: true,
             raw_frame_sink_ready: true,
+            width: 1280,
+            height: 720,
+            fps: 30,
             published_frame_count: 7,
             last_frame_bytes: 16,
         });
@@ -1396,10 +1440,33 @@ mod tests {
     }
 
     #[test]
+    fn native_camera_sink_tracks_configured_output_format() {
+        let mut sink = NativeCameraSinkState::default();
+
+        sink.configure_output(1280, 720, 30);
+
+        assert_eq!(sink.width, 1280);
+        assert_eq!(sink.height, 720);
+        assert_eq!(sink.fps, 30);
+
+        sink.publish_raw_frame(7, None).unwrap();
+        sink.clear_output();
+
+        assert_eq!(sink.width, 0);
+        assert_eq!(sink.height, 0);
+        assert_eq!(sink.fps, 0);
+        assert_eq!(sink.published_frame_count, 0);
+        assert_eq!(sink.last_frame_bytes, 0);
+    }
+
+    #[test]
     fn native_camera_sink_counts_raw_frames_when_ready() {
         let mut sink = NativeCameraSinkState {
             device_installed: true,
             raw_frame_sink_ready: true,
+            width: 0,
+            height: 0,
+            fps: 0,
             published_frame_count: 0,
             last_frame_bytes: 0,
         };

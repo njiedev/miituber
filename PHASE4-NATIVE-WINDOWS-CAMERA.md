@@ -17,6 +17,8 @@ The app already has the right producer side:
   `OutputFrameStore`.
 - Rust owns a managed `NativeCameraSinkState` for eventual Windows device
   detection and raw-frame sink readiness.
+- Start Output configures `NativeCameraSinkState` with the current width,
+  height, and fps; Stop Output clears that format and frame counters.
 - `publish_virtual_camera_frame` already calls the native sink handoff hook;
   today it is a no-op until `rawFrameSinkReady` is true.
 - Rust tests cover both the dormant no-op path and the ready-sink path that
