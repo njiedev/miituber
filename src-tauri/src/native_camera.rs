@@ -3,6 +3,7 @@ use std::process::Command;
 
 pub(crate) const NATIVE_CAMERA_DEVICE_NAME: &str = "MiiTuber Camera";
 const WINDOWS_VIRTUAL_CAMERA_MIN_BUILD: u32 = 22000;
+const MEDIA_TIME_UNITS_PER_SECOND: u64 = 10_000_000;
 
 #[derive(Clone, Default)]
 pub(crate) struct NativeCameraSinkState {
@@ -31,6 +32,8 @@ pub(crate) struct NativeCameraFrameSnapshot {
     pub(crate) height: u32,
     pub(crate) fps: u32,
     pub(crate) stride_bytes: usize,
+    pub(crate) sample_time_100ns: u64,
+    pub(crate) sample_duration_100ns: u64,
     pub(crate) bgra_bytes: Vec<u8>,
 }
 
@@ -82,6 +85,8 @@ impl NativeCameraSinkState {
             height: self.height,
             fps: self.fps,
             stride_bytes: native_camera_bgra_stride_bytes(self.width)?,
+            sample_time_100ns: native_camera_sample_time_100ns(frame_index, self.fps)?,
+            sample_duration_100ns: native_camera_sample_duration_100ns(self.fps)?,
             bgra_bytes,
         };
         self.published_frame_count = frame_index;
@@ -143,6 +148,21 @@ pub(crate) fn native_camera_bgra_stride_bytes(width: u32) -> Result<usize, Strin
         .ok_or_else(|| "Native camera BGRA stride overflowed".to_string())?;
 
     usize::try_from(bytes).map_err(|_| "Native camera BGRA stride is too large".to_string())
+}
+
+pub(crate) fn native_camera_sample_duration_100ns(fps: u32) -> Result<u64, String> {
+    if fps == 0 {
+        return Err("Native camera sample duration requires non-zero fps".to_string());
+    }
+
+    Ok(MEDIA_TIME_UNITS_PER_SECOND / u64::from(fps))
+}
+
+pub(crate) fn native_camera_sample_time_100ns(frame_index: u64, fps: u32) -> Result<u64, String> {
+    let duration = native_camera_sample_duration_100ns(fps)?;
+    frame_index
+        .checked_mul(duration)
+        .ok_or_else(|| "Native camera sample timestamp overflowed".to_string())
 }
 
 fn native_camera_sink_ready_for_config(

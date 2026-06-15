@@ -58,3 +58,4 @@
 - Chose BGRA as the first native camera buffer format because webview RGBA converts with a cheap red/blue channel swap and fits common Windows RGB32-style media source buffers; defer NV12 until a real sink requires it.
 - Chose to store the latest converted BGRA frame inside `NativeCameraSinkState` because the future Media Foundation source needs a complete camera-ready snapshot without depending on webview RGBA details.
 - Chose to store native frame metadata with the BGRA snapshot because Media Foundation sample creation needs frame timing and row stride, not just pixel bytes.
+- Chose Media Foundation 100ns units for native frame sample time/duration because Windows samples expect timestamps in that convention and the conversion is deterministic from frame index and fps.

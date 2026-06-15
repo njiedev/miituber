@@ -1075,6 +1075,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 mod tests {
     use super::native_camera::{
         native_camera_bgra_stride_bytes, native_camera_device_list_contains_miituber,
+        native_camera_sample_duration_100ns, native_camera_sample_time_100ns,
         native_camera_status_from_sink, parse_windows_build_number, rgba_to_bgra_frame,
         start_native_camera_sink, stop_native_camera_sink, NativeCameraOutputConfig,
         NativeCameraSinkState,
@@ -1530,6 +1531,14 @@ mod tests {
     }
 
     #[test]
+    fn calculates_media_foundation_sample_timing() {
+        assert_eq!(native_camera_sample_duration_100ns(30).unwrap(), 333_333);
+        assert_eq!(native_camera_sample_duration_100ns(60).unwrap(), 166_666);
+        assert_eq!(native_camera_sample_time_100ns(7, 30).unwrap(), 2_333_331);
+        assert!(native_camera_sample_duration_100ns(0).is_err());
+    }
+
+    #[test]
     fn native_camera_sink_tracks_configured_output_format() {
         let mut sink = NativeCameraSinkState::default();
 
@@ -1581,6 +1590,8 @@ mod tests {
         assert_eq!(snapshot.height, 2);
         assert_eq!(snapshot.fps, 30);
         assert_eq!(snapshot.stride_bytes, 8);
+        assert_eq!(snapshot.sample_time_100ns, 2_333_331);
+        assert_eq!(snapshot.sample_duration_100ns, 333_333);
         assert_eq!(
             snapshot.bgra_bytes,
             vec![
