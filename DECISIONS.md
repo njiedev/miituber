@@ -1,0 +1,24 @@
+# Decisions
+
+- Chose Tauri over Electron because the app needs a small desktop shell and later native virtual camera output from Rust.
+- Chose import-only MVP over an in-app avatar creator because users can bring their own data files and the creator UI is out of scope.
+- Chose local FFL renderer proxying over frontend-direct renderer access because Rust can validate uploads, hide renderer details, and cache repeated renders.
+- Chose the existing Go FFL web server over direct binary protocol integration for Phase 1 because it proves the pipeline with minimal new code.
+- Chose byte-length validation before renderer forwarding because malformed uploads should fail cleanly before reaching the renderer.
+- Chose SHA-256 in-memory PNG caching because the same avatar bytes produce the same static Phase 1 render.
+- Chose legacy .miic extended-FFSD truncation to 96-byte FFSD with recalculated CRC16 for Phase 1 because the local renderer endpoint accepts 46-96 byte payloads and old MiiCreator .miic v1-v3 stores FFSD-compatible data first.
+- Chose to reject 128-byte current .miic v4 files until a real converter exists because FFSD, CharInfo, CoreData, and Studio-slice probes either fail validation or render visibly incorrect avatars.
+- Chose a file-based agent bridge over live agent-to-agent integration because both workspaces can coordinate through append-only Markdown without adding network or tool dependencies.
+- Chose Three.js GLB display as the next Phase 1 render view because the FFL server can export model bytes and Three.js can own camera, head pose, and later MediaPipe-driven transforms in the webview.
+- Chose one all-expression GLB request for Phase 2 because expression changes should be local Three.js material swaps instead of per-frame renderer calls.
+- Chose a dedicated `AvatarScene` module over keeping Three.js setup in `main.ts` because Phase 2 needs rendering, expression variants, orbit controls, and later head pose updates to evolve together.
+- Chose MediaPipe Face Landmarker in the webview for Phase 2 because it can read webcam frames directly and outputs the blendshapes plus face matrix the avatar scene needs.
+- Chose a pure TypeScript expression mapper with tests because threshold tuning should be isolated from camera permissions, renderer requests, and Three.js state.
+- Chose a narrow Tauri CSP with temporary MediaPipe CDN access because Phase 2 needs model/WASM downloads now while preserving a path to bundle those assets before release.
+- Chose lazy-loading MediaPipe over a static import because tracking starts only after user action and the static avatar render path should stay lightweight.
+- Chose a 30fps MediaPipe processing cap while keeping Three.js on requestAnimationFrame because webcam tracking should run at camera cadence while rendering stays smooth.
+- Chose signal-level hysteresis plus expression-level hold time because raw MediaPipe scores can hover near thresholds and discrete Mii expression swaps should not flicker.
+- Chose a transparent Three.js background toggle because OBS-style compositing needs alpha output, while the checkerboard preview still helps debug transparency in-app.
+- Chose separate render FPS and tracking FPS readouts because Three.js and MediaPipe run on different loops and need different performance diagnosis.
+- Chose a collapsed debug panel for tracking internals because expression tuning needs visibility without making the default import-and-track workflow feel like a diagnostics screen.
+- Chose to require expression variants before enabling tracking because Phase 2 expression animation depends on local Three.js material swaps, not just any loaded GLB.

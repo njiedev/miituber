@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiiTuber</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main class="app-shell">
+      <section class="import-panel" aria-labelledby="app-title">
+        <div>
+          <p class="eyebrow">Phase 2 prototype</p>
+          <h1 id="app-title">Animate a Wii-style avatar</h1>
+          <p class="lede">
+            Import a local .ffsd, render the 3D head through the local FFL
+            server, then start webcam tracking to drive expression and head pose.
+          </p>
+        </div>
+
+        <div class="renderer-health" id="renderer-health" data-tone="idle">
+          Checking renderer on port 5000...
+        </div>
+
+        <label class="file-picker" for="mii-file">
+          <span>Select .ffsd, CharInfo, Studio, or legacy .miic file</span>
+          <strong id="file-name">No file selected</strong>
+        </label>
+        <input id="mii-file" type="file" accept=".ffsd,.miic,.bin,.dat" />
+
+        <div class="action-row">
+          <button id="render-button" type="button" disabled>Render 3D Model</button>
+        </div>
+
+        <div class="scene-controls" aria-label="3D render controls">
+          <label>
+            Expression
+            <select id="expression-select" disabled>
+              <option value="0">0 Normal</option>
+            </select>
+          </label>
+
+          <label class="checkbox-control">
+            <input id="debug-materials" type="checkbox" />
+            Debug geometry colors
+          </label>
+
+          <label class="checkbox-control">
+            <input id="transparent-background" type="checkbox" />
+            Transparent background
+          </label>
+        </div>
+
+        <div class="tracking-controls" aria-label="Webcam tracking controls">
+          <label>
+            Camera
+            <select id="camera-select" disabled>
+              <option value="">Default camera</option>
+            </select>
+          </label>
+          <div class="action-row">
+            <button id="start-tracking-button" type="button" disabled>
+              Start Tracking
+            </button>
+            <button id="stop-tracking-button" type="button" disabled>
+              Stop Tracking
+            </button>
+          </div>
+          <p id="tracking-status" data-tone="idle">
+            Render an avatar before starting webcam tracking.
+          </p>
+          <p class="privacy-note">
+            Webcam frames stay local in the webview. They are used for live
+            tracking only and are not displayed, recorded, or sent to the FFL
+            renderer.
+          </p>
+          <details class="debug-panel">
+            <summary>Debug tracking data</summary>
+            <dl class="tracking-debug" aria-label="Tracking debug values">
+              <div>
+                <dt>Expression</dt>
+                <dd id="debug-expression">0</dd>
+              </div>
+              <div>
+                <dt>Head</dt>
+                <dd id="debug-head-rotation">0 / 0 / 0</dd>
+              </div>
+              <div>
+                <dt>FPS</dt>
+                <dd id="debug-tracking-fps">0</dd>
+              </div>
+              <div>
+                <dt>Render</dt>
+                <dd id="debug-render-fps">0</dd>
+              </div>
+              <div>
+                <dt>Detect</dt>
+                <dd id="debug-detect-ms">0 ms</dd>
+              </div>
+              <div>
+                <dt>Scores</dt>
+                <dd id="debug-expression-scores">smile 0.00, mouth 0.00</dd>
+              </div>
+              <div>
+                <dt>Top inputs</dt>
+                <dd id="debug-top-blendshapes">none</dd>
+              </div>
+            </dl>
+          </details>
+        </div>
+        <p id="status" data-tone="idle">
+          Choose a .ffsd file to render before starting tracking. Current
+          128-byte .miic v4 files still need a converter.
+        </p>
+      </section>
+
+      <section class="preview-panel" aria-label="Rendered avatar preview">
+        <div class="preview-frame">
+          <canvas id="mii-viewer" aria-label="Rendered Wii-style avatar model"></canvas>
+          <p class="empty-preview">Rendered 3D model appears here.</p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
