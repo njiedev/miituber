@@ -465,7 +465,7 @@ function setNativeCameraStatus(status: NativeCameraStatus | null, error?: string
 
   if (status.deviceInstalled) {
     debugNativeCameraEl.textContent = status.rawFrameSinkReady
-      ? `${status.deviceName} ready.`
+      ? `${status.deviceName} ready, ${status.publishedFrameCount} raw frames, ${formatBytes(status.lastFrameBytes)} last.`
       : `${status.deviceName} installed, sink not ready.`;
     return;
   }
