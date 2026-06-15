@@ -28,6 +28,7 @@ const OUTPUT_TRANSPARENT_SOURCE_URL: &str = "http://127.0.0.1:49321/source-trans
 const MJPEG_BOUNDARY: &str = "miituber-frame";
 const OUTPUT_SERVER_HOME_MARKER: &str = "MiiTuber output server";
 const NATIVE_CAMERA_DEVICE_NAME: &str = "MiiTuber Camera";
+const WINDOWS_VIRTUAL_CAMERA_MIN_BUILD: u32 = 22000;
 
 #[derive(serde::Serialize)]
 struct RendererStatus {
@@ -237,6 +238,8 @@ struct VirtualCameraStatus {
 #[serde(rename_all = "camelCase")]
 struct NativeCameraStatus {
     platform_supported: bool,
+    windows_virtual_camera_api_supported: bool,
+    windows_build: Option<u32>,
     device_probe_available: bool,
     device_installed: bool,
     raw_frame_sink_ready: bool,
@@ -257,6 +260,12 @@ static OUTPUT_SERVER_STARTED: OnceLock<()> = OnceLock::new();
 struct NativeCameraDeviceProbe {
     available: bool,
     installed: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NativeCameraPlatformProbe {
+    windows_build: Option<u32>,
+    virtual_camera_api_supported: bool,
 }
 
 #[derive(Debug)]
@@ -539,6 +548,7 @@ async fn get_virtual_camera_status(
 async fn get_native_camera_status(
     native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
 ) -> Result<NativeCameraStatus, String> {
+    let platform_probe = native_camera_platform_probe();
     let device_probe = native_camera_device_probe();
     let native_sink = native_sink
         .lock()
@@ -561,7 +571,11 @@ async fn get_native_camera_status(
         })
         .map_err(|_| "Native camera sink state lock failed".to_string())?;
 
-    Ok(native_camera_status_from_sink(&native_sink))
+    Ok(native_camera_status_from_sink(
+        &native_sink,
+        platform_probe.windows_build,
+        platform_probe.virtual_camera_api_supported,
+    ))
 }
 
 #[tauri::command]
@@ -655,7 +669,11 @@ fn virtual_camera_status_from_session(session: &VirtualCameraSession) -> Virtual
     }
 }
 
-fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraStatus {
+fn native_camera_status_from_sink(
+    sink: &NativeCameraSinkState,
+    windows_build: Option<u32>,
+    windows_virtual_camera_api_supported: bool,
+) -> NativeCameraStatus {
     let device_name = NATIVE_CAMERA_DEVICE_NAME.to_string();
     let raw_frame_sink_ready = sink.device_installed && sink.raw_frame_sink_ready;
 
@@ -663,6 +681,8 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
     {
         NativeCameraStatus {
             platform_supported: true,
+            windows_virtual_camera_api_supported,
+            windows_build,
             device_probe_available: sink.device_probe_available,
             device_installed: sink.device_installed,
             raw_frame_sink_ready,
@@ -672,7 +692,12 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
             published_frame_count: sink.published_frame_count,
             last_frame_bytes: sink.last_frame_bytes,
             device_name,
-            message: native_camera_status_message(sink, raw_frame_sink_ready),
+            message: native_camera_status_message(
+                sink,
+                raw_frame_sink_ready,
+                windows_build,
+                windows_virtual_camera_api_supported,
+            ),
         }
     }
 
@@ -680,6 +705,8 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
     {
         NativeCameraStatus {
             platform_supported: false,
+            windows_virtual_camera_api_supported: false,
+            windows_build: None,
             device_probe_available: false,
             device_installed: false,
             raw_frame_sink_ready: false,
@@ -697,12 +724,61 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
 }
 
 #[cfg(target_os = "windows")]
+fn native_camera_platform_probe() -> NativeCameraPlatformProbe {
+    let script = "[Environment]::OSVersion.Version.Build";
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output();
+
+    let windows_build = match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            parse_windows_build_number(&stdout)
+        }
+        Ok(output) => {
+            eprintln!(
+                "native_camera_platform_probe: PowerShell exited with status {:?}",
+                output.status.code()
+            );
+            None
+        }
+        Err(error) => {
+            eprintln!("native_camera_platform_probe: could not run PowerShell: {error}");
+            None
+        }
+    };
+
+    NativeCameraPlatformProbe {
+        windows_build,
+        virtual_camera_api_supported: windows_build
+            .is_some_and(|build| build >= WINDOWS_VIRTUAL_CAMERA_MIN_BUILD),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn native_camera_platform_probe() -> NativeCameraPlatformProbe {
+    NativeCameraPlatformProbe {
+        windows_build: None,
+        virtual_camera_api_supported: false,
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn native_camera_status_message(
     sink: &NativeCameraSinkState,
     raw_frame_sink_ready: bool,
+    windows_build: Option<u32>,
+    windows_virtual_camera_api_supported: bool,
 ) -> String {
     if raw_frame_sink_ready {
         "Native Windows camera sink is ready for raw frames.".to_string()
+    } else if !windows_virtual_camera_api_supported {
+        match windows_build {
+            Some(build) => format!(
+                "This Windows build ({build}) is below the Windows 11 virtual camera API floor ({WINDOWS_VIRTUAL_CAMERA_MIN_BUILD}). Use the OBS Browser Source path for now."
+            ),
+            None => "Could not check whether this Windows version supports the native virtual camera API. Use the OBS Browser Source path for now.".to_string(),
+        }
     } else if !sink.device_probe_available {
         "Could not check whether the native Windows camera device is installed. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string()
     } else if sink.device_installed {
@@ -759,6 +835,10 @@ fn native_camera_device_list_contains_miituber(device_list: &str) -> bool {
     device_list
         .lines()
         .any(|line| line.trim().eq_ignore_ascii_case(NATIVE_CAMERA_DEVICE_NAME))
+}
+
+fn parse_windows_build_number(output: &str) -> Option<u32> {
+    output.lines().find_map(|line| line.trim().parse().ok())
 }
 
 fn ensure_output_server_started(state: SharedVirtualCameraState) {
@@ -1262,8 +1342,9 @@ mod tests {
         is_jpeg_frame, is_png_frame, latest_jpeg, latest_png, latest_rgba,
         native_camera_device_list_contains_miituber, native_camera_status_from_sink,
         normalize_mii_data_for_renderer, output_server_home_response_is_ours,
-        output_session_is_running, publish_output_frame, start_output_session, stop_output_session,
-        validate_rgba_frame, virtual_camera_status_from_session, NativeCameraSinkState,
+        output_session_is_running, parse_windows_build_number, publish_output_frame,
+        start_output_session, stop_output_session, validate_rgba_frame,
+        virtual_camera_status_from_session, NativeCameraSinkState,
         PublishVirtualCameraFrameRequest, SharedNativeCameraSinkState, SharedVirtualCameraState,
         StartVirtualCameraRequest, VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS,
         OUTPUT_FRAME_URL, OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
@@ -1553,9 +1634,15 @@ mod tests {
 
     #[test]
     fn native_camera_status_is_explicit_about_install_state() {
-        let status = native_camera_status_from_sink(&NativeCameraSinkState::default());
+        let status =
+            native_camera_status_from_sink(&NativeCameraSinkState::default(), Some(22000), true);
 
         assert_eq!(status.device_name, "MiiTuber Camera");
+        assert_eq!(status.windows_build, Some(22000));
+        assert_eq!(
+            status.windows_virtual_camera_api_supported,
+            cfg!(target_os = "windows")
+        );
         assert!(!status.device_probe_available);
         assert!(!status.device_installed);
         assert!(!status.raw_frame_sink_ready);
@@ -1582,16 +1669,20 @@ mod tests {
 
     #[test]
     fn native_camera_status_reflects_sink_readiness() {
-        let status = native_camera_status_from_sink(&NativeCameraSinkState {
-            device_probe_available: true,
-            device_installed: true,
-            raw_frame_sink_ready: true,
-            width: 1280,
-            height: 720,
-            fps: 30,
-            published_frame_count: 7,
-            last_frame_bytes: 16,
-        });
+        let status = native_camera_status_from_sink(
+            &NativeCameraSinkState {
+                device_probe_available: true,
+                device_installed: true,
+                raw_frame_sink_ready: true,
+                width: 1280,
+                height: 720,
+                fps: 30,
+                published_frame_count: 7,
+                last_frame_bytes: 16,
+            },
+            Some(22000),
+            true,
+        );
 
         assert_eq!(status.device_name, "MiiTuber Camera");
 
@@ -1613,16 +1704,20 @@ mod tests {
 
     #[test]
     fn native_camera_status_does_not_report_ready_without_device() {
-        let status = native_camera_status_from_sink(&NativeCameraSinkState {
-            device_probe_available: true,
-            device_installed: false,
-            raw_frame_sink_ready: true,
-            width: 1280,
-            height: 720,
-            fps: 30,
-            published_frame_count: 7,
-            last_frame_bytes: 16,
-        });
+        let status = native_camera_status_from_sink(
+            &NativeCameraSinkState {
+                device_probe_available: true,
+                device_installed: false,
+                raw_frame_sink_ready: true,
+                width: 1280,
+                height: 720,
+                fps: 30,
+                published_frame_count: 7,
+                last_frame_bytes: 16,
+            },
+            Some(22000),
+            true,
+        );
 
         assert!(!status.device_installed);
         assert!(!status.raw_frame_sink_ready);
@@ -1630,22 +1725,47 @@ mod tests {
 
     #[test]
     fn native_camera_status_reports_unavailable_probe_separately() {
-        let status = native_camera_status_from_sink(&NativeCameraSinkState {
-            device_probe_available: false,
-            device_installed: false,
-            raw_frame_sink_ready: false,
-            width: 1280,
-            height: 720,
-            fps: 30,
-            published_frame_count: 0,
-            last_frame_bytes: 0,
-        });
+        let status = native_camera_status_from_sink(
+            &NativeCameraSinkState {
+                device_probe_available: false,
+                device_installed: false,
+                raw_frame_sink_ready: false,
+                width: 1280,
+                height: 720,
+                fps: 30,
+                published_frame_count: 0,
+                last_frame_bytes: 0,
+            },
+            Some(22000),
+            true,
+        );
 
         assert!(!status.device_probe_available);
         assert!(!status.device_installed);
 
         #[cfg(target_os = "windows")]
         assert!(status.message.contains("Could not check"));
+    }
+
+    #[test]
+    fn native_camera_status_reports_unsupported_windows_build() {
+        let status =
+            native_camera_status_from_sink(&NativeCameraSinkState::default(), Some(19045), false);
+
+        assert_eq!(status.windows_build, Some(19045));
+        assert!(!status.windows_virtual_camera_api_supported);
+
+        #[cfg(target_os = "windows")]
+        assert!(status
+            .message
+            .contains("below the Windows 11 virtual camera API floor"));
+    }
+
+    #[test]
+    fn parses_windows_build_number_from_command_output() {
+        assert_eq!(parse_windows_build_number("22631\r\n"), Some(22631));
+        assert_eq!(parse_windows_build_number("\r\n22000\r\n"), Some(22000));
+        assert_eq!(parse_windows_build_number("not a build"), None);
     }
 
     #[test]

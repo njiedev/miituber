@@ -216,6 +216,8 @@ type VirtualCameraStatus = {
 
 type NativeCameraStatus = {
   platformSupported: boolean;
+  windowsVirtualCameraApiSupported: boolean;
+  windowsBuild: number | null;
   deviceProbeAvailable: boolean;
   deviceInstalled: boolean;
   rawFrameSinkReady: boolean;
@@ -466,6 +468,13 @@ function setNativeCameraStatus(status: NativeCameraStatus | null, error?: string
 
   if (!status) {
     debugNativeCameraEl.textContent = "Not checked.";
+    return;
+  }
+
+  if (status.platformSupported && !status.windowsVirtualCameraApiSupported) {
+    debugNativeCameraEl.textContent = status.windowsBuild
+      ? `Windows build ${status.windowsBuild} is below the native camera API floor.`
+      : "Could not check Windows native camera API support.";
     return;
   }
 

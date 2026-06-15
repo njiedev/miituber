@@ -21,6 +21,8 @@ The app already has the right producer side:
   friendly names and marks `deviceInstalled` when `MiiTuber Camera` exists.
 - The native status also reports `deviceProbeAvailable` so a failed Windows
   device query is not presented as "camera not installed."
+- The native status reports the Windows build and whether the Windows 11
+  virtual camera API floor is met before attempting device/source work.
 - Raw-frame readiness is reported only when both the device is installed and the
   native sink says it is ready.
 - Start Output configures `NativeCameraSinkState` with the current width,
@@ -61,10 +63,11 @@ capture is gated by current readiness, not just the startup check.
 
 The native camera will likely need one of these approaches:
 
-- Media Foundation virtual camera style source, preferred if it can be shipped
-  without an installer-hostile driver path.
+- Media Foundation virtual camera source via `MFCreateVirtualCamera`, preferred
+  for Windows 11 build 22000+ because Microsoft documents it as a user-mode
+  virtual camera path.
 - DirectShow virtual source filter, older but widely supported by conferencing
-  apps.
+  apps and a possible fallback if Windows 10 support becomes necessary.
 
 Either path needs a real device registration story. Merely streaming MJPEG from
 Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
@@ -72,6 +75,8 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
 ## First Milestone
 
 - Keep `get_native_camera_status` read-only until there is a real device sink.
+- Show when the current Windows build is below the Media Foundation virtual
+  camera API floor.
 - Show `MiiTuber Camera not installed yet` in the output diagnostics.
 - Show a separate "could not check" state if Windows camera probing fails.
 - Use the OBS path to finish the Phase 4 live proof.
