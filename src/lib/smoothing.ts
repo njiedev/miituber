@@ -1,4 +1,89 @@
-import type { ExpressionScores, FFLExpression, HeadRotation } from "./types";
+import type { BlendshapeCategory, ExpressionScores, FFLExpression, HeadRotation } from "./types";
+import type { TuningProfile } from "./tuningProfile";
+
+export type OneEuroFilterOptions = {
+  minCutoff: number;
+  beta: number;
+  derivativeCutoff: number;
+};
+
+const DEFAULT_ONE_EURO_OPTIONS: OneEuroFilterOptions = {
+  minCutoff: 1,
+  beta: 0.02,
+  derivativeCutoff: 1,
+};
+
+export class OneEuroFilter {
+  private previousValue: number | null = null;
+  private previousDerivative = 0;
+  private previousTimeMs: number | null = null;
+
+  constructor(private readonly options: OneEuroFilterOptions = DEFAULT_ONE_EURO_OPTIONS) {}
+
+  update(value: number, nowMs: number) {
+    if (this.previousValue === null || this.previousTimeMs === null) {
+      this.previousValue = value;
+      this.previousTimeMs = nowMs;
+      return value;
+    }
+
+    const elapsedSeconds = Math.max((nowMs - this.previousTimeMs) / 1000, 1 / 1000);
+    const rawDerivative = (value - this.previousValue) / elapsedSeconds;
+    const derivative = lowPass(
+      rawDerivative,
+      this.previousDerivative,
+      smoothingAlpha(this.options.derivativeCutoff, elapsedSeconds),
+    );
+    const cutoff = this.options.minCutoff + this.options.beta * Math.abs(derivative);
+    const smoothed = lowPass(
+      value,
+      this.previousValue,
+      smoothingAlpha(cutoff, elapsedSeconds),
+    );
+
+    this.previousValue = smoothed;
+    this.previousDerivative = derivative;
+    this.previousTimeMs = nowMs;
+    return smoothed;
+  }
+
+  reset() {
+    this.previousValue = null;
+    this.previousDerivative = 0;
+    this.previousTimeMs = null;
+  }
+}
+
+export class BlendshapeSmoother {
+  private readonly filters = new Map<string, OneEuroFilter>();
+
+  constructor(private options: OneEuroFilterOptions = DEFAULT_ONE_EURO_OPTIONS) {}
+
+  update(blendshapes: BlendshapeCategory[], nowMs: number): BlendshapeCategory[] {
+    return blendshapes.map(({ categoryName, score }) => ({
+      categoryName,
+      score: this.filterFor(categoryName).update(score, nowMs),
+    }));
+  }
+
+  reset() {
+    this.filters.clear();
+  }
+
+  updateOptions(options: OneEuroFilterOptions) {
+    this.options = options;
+    this.reset();
+  }
+
+  private filterFor(categoryName: string) {
+    const existing = this.filters.get(categoryName);
+    if (existing) return existing;
+
+    const filter = new OneEuroFilter(this.options);
+    this.filters.set(categoryName, filter);
+    return filter;
+  }
+}
 
 export class ExpressionStabilizer {
   private currentExpression: FFLExpression;
@@ -6,7 +91,7 @@ export class ExpressionStabilizer {
 
   constructor(
     initialExpression: FFLExpression,
-    private readonly minimumHoldMs: number,
+    private minimumHoldMs: number,
   ) {
     this.currentExpression = initialExpression;
   }
@@ -21,6 +106,14 @@ export class ExpressionStabilizer {
     }
 
     return this.currentExpression;
+  }
+
+  updateMinimumHoldMs(minimumHoldMs: number) {
+    this.minimumHoldMs = minimumHoldMs;
+  }
+
+  getRemainingHoldMs(nowMs: number) {
+    return Math.max(0, this.minimumHoldMs - (nowMs - this.lastChangedAt));
   }
 }
 
@@ -48,14 +141,14 @@ export class HysteresisTracker {
   private active = false;
 
   constructor(
-    private readonly enterThreshold: number,
-    private readonly exitThreshold: number,
+    private enterThreshold: number,
+    private exitThreshold: number,
   ) {}
 
   update(score: number) {
-    if (this.active && score < this.exitThreshold) {
+    if (this.active && score <= this.exitThreshold) {
       this.active = false;
-    } else if (!this.active && score > this.enterThreshold) {
+    } else if (!this.active && score >= this.enterThreshold) {
       this.active = true;
     }
 
@@ -65,16 +158,31 @@ export class HysteresisTracker {
   reset() {
     this.active = false;
   }
+
+  updateThresholds(enterThreshold: number, exitThreshold: number) {
+    this.enterThreshold = enterThreshold;
+    this.exitThreshold = exitThreshold;
+  }
 }
 
 export class ExpressionSignalTracker {
-  private readonly mouthOpen = new HysteresisTracker(0.45, 0.32);
-  private readonly smile = new HysteresisTracker(0.55, 0.42);
-  private readonly blinkLeft = new HysteresisTracker(0.65, 0.42);
-  private readonly blinkRight = new HysteresisTracker(0.65, 0.42);
-  private readonly anger = new HysteresisTracker(0.55, 0.4);
-  private readonly sorrow = new HysteresisTracker(0.55, 0.4);
-  private readonly surprise = new HysteresisTracker(0.55, 0.4);
+  private readonly mouthOpen: HysteresisTracker;
+  private readonly smile: HysteresisTracker;
+  private readonly blinkLeft: HysteresisTracker;
+  private readonly blinkRight: HysteresisTracker;
+  private readonly anger: HysteresisTracker;
+  private readonly sorrow: HysteresisTracker;
+  private readonly surprise: HysteresisTracker;
+
+  constructor(profile: TuningProfile) {
+    this.mouthOpen = createTracker(profile, "mouthOpen");
+    this.smile = createTracker(profile, "smile");
+    this.blinkLeft = createTracker(profile, "blinkLeft");
+    this.blinkRight = createTracker(profile, "blinkRight");
+    this.anger = createTracker(profile, "anger");
+    this.sorrow = createTracker(profile, "sorrow");
+    this.surprise = createTracker(profile, "surprise");
+  }
 
   update(scores: ExpressionScores) {
     return {
@@ -97,8 +205,53 @@ export class ExpressionSignalTracker {
     this.sorrow.reset();
     this.surprise.reset();
   }
+
+  updateProfile(profile: TuningProfile) {
+    this.mouthOpen.updateThresholds(
+      profile.thresholds.mouthOpen.enter,
+      profile.thresholds.mouthOpen.exit,
+    );
+    this.smile.updateThresholds(
+      profile.thresholds.smile.enter,
+      profile.thresholds.smile.exit,
+    );
+    this.blinkLeft.updateThresholds(
+      profile.thresholds.blinkLeft.enter,
+      profile.thresholds.blinkLeft.exit,
+    );
+    this.blinkRight.updateThresholds(
+      profile.thresholds.blinkRight.enter,
+      profile.thresholds.blinkRight.exit,
+    );
+    this.anger.updateThresholds(
+      profile.thresholds.anger.enter,
+      profile.thresholds.anger.exit,
+    );
+    this.sorrow.updateThresholds(
+      profile.thresholds.sorrow.enter,
+      profile.thresholds.sorrow.exit,
+    );
+    this.surprise.updateThresholds(
+      profile.thresholds.surprise.enter,
+      profile.thresholds.surprise.exit,
+    );
+  }
+}
+
+function createTracker(profile: TuningProfile, name: keyof ExpressionScores) {
+  const thresholds = profile.thresholds[name];
+  return new HysteresisTracker(thresholds.enter, thresholds.exit);
 }
 
 function lerp(current: number, next: number, response: number) {
   return current + (next - current) * response;
+}
+
+function smoothingAlpha(cutoff: number, elapsedSeconds: number) {
+  const tau = 1 / (2 * Math.PI * cutoff);
+  return 1 / (1 + tau / elapsedSeconds);
+}
+
+function lowPass(value: number, previousValue: number, alpha: number) {
+  return alpha * value + (1 - alpha) * previousValue;
 }

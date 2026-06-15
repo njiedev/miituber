@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { extractHeadRotation, mapToExpression } from "./expressionMapper";
+import {
+  classifyChannels,
+  composeExpression,
+  extractHeadRotation,
+  mapToExpression,
+} from "./expressionMapper";
 import { FFLExpression, type BlendshapeCategory } from "./types";
+import { createDefaultTuningProfile } from "./tuningProfile";
 
 function shapes(scores: Record<string, number>): BlendshapeCategory[] {
   return Object.entries(scores).map(([categoryName, score]) => ({
@@ -42,15 +48,24 @@ describe("mapToExpression", () => {
     expect(result.expressionIndex).toBe(FFLExpression.OpenMouth);
   });
 
-  it("maps surprise and open-mouth surprise", () => {
-    expect(
-      mapToExpression(shapes({ eyeWideLeft: 0.8, eyeWideRight: 0.8 }))
-        .expressionIndex,
-    ).toBe(FFLExpression.Surprise);
+  it("treats funnel and pucker as mouth-open contributors", () => {
+    const result = mapToExpression(
+      shapes({ mouthFunnel: 0.7, mouthPucker: 0.7 }),
+    );
 
+    expect(result.scores.mouthOpen).toBe(0.7);
+    expect(result.expressionIndex).toBe(FFLExpression.OpenMouth);
+  });
+
+  it("maps surprise when widened eyes combine with raised brows and an open jaw", () => {
     expect(
       mapToExpression(
-        shapes({ jawOpen: 0.7, eyeWideLeft: 0.8, eyeWideRight: 0.8 }),
+        shapes({
+          jawOpen: 0.7,
+          eyeWideLeft: 0.8,
+          eyeWideRight: 0.8,
+          browInnerUp: 0.8,
+        }),
       ).expressionIndex,
     ).toBe(FFLExpression.SurpriseOpenMouth);
   });
@@ -69,12 +84,25 @@ describe("mapToExpression", () => {
   });
 
   it("maps sorrow and open-mouth sorrow when anger is inactive", () => {
-    expect(mapToExpression(shapes({ browInnerUp: 0.8 })).expressionIndex).toBe(
-      FFLExpression.Sorrow,
-    );
+    expect(
+      mapToExpression(
+        shapes({
+          mouthFrownLeft: 0.8,
+          mouthFrownRight: 0.8,
+          browInnerUp: 0.8,
+        }),
+      ).expressionIndex,
+    ).toBe(FFLExpression.Sorrow);
 
     expect(
-      mapToExpression(shapes({ jawOpen: 0.7, browInnerUp: 0.8 })).expressionIndex,
+      mapToExpression(
+        shapes({
+          jawOpen: 0.7,
+          mouthFrownLeft: 0.8,
+          mouthFrownRight: 0.8,
+          browInnerUp: 0.8,
+        }),
+      ).expressionIndex,
     ).toBe(FFLExpression.SorrowOpenMouth);
   });
 
@@ -83,6 +111,8 @@ describe("mapToExpression", () => {
       shapes({
         browDownLeft: 0.8,
         browDownRight: 0.8,
+        mouthFrownLeft: 0.8,
+        mouthFrownRight: 0.8,
         browInnerUp: 0.8,
       }),
     );
@@ -136,8 +166,39 @@ describe("mapToExpression", () => {
     expect(result.scores.blinkLeft).toBe(0.1);
     expect(result.scores.blinkRight).toBe(0.7);
     expect(result.scores.anger).toBe(0.4);
-    expect(result.scores.sorrow).toBe(0.8);
-    expect(result.scores.surprise).toBeCloseTo(0.3);
+    expect(result.scores.sorrow).toBeCloseTo(0.266);
+    expect(result.scores.surprise).toBeCloseTo(0.45);
+  });
+
+  it("returns decomposed channels for debugging and composition", () => {
+    const result = mapToExpression(
+      shapes({
+        jawOpen: 0.7,
+        mouthSmileLeft: 0.8,
+        mouthSmileRight: 0.8,
+      }),
+    );
+
+    expect(result.channels).toEqual({
+      eyes: "open",
+      mouth: "open",
+      emotion: "smile",
+    });
+  });
+
+  it("applies profile gains before channel classification", () => {
+    const profile = createDefaultTuningProfile();
+    profile.gains.smile = 2;
+
+    const result = mapToExpression(
+      shapes({ mouthSmileLeft: 0.3, mouthSmileRight: 0.3 }),
+      undefined,
+      undefined,
+      profile,
+    );
+
+    expect(result.scores.smile).toBe(0.6);
+    expect(result.expressionIndex).toBe(FFLExpression.Smile);
   });
 
   it("can use stabilized expression signals instead of raw thresholds", () => {
@@ -156,6 +217,106 @@ describe("mapToExpression", () => {
     );
 
     expect(result.expressionIndex).toBe(FFLExpression.Smile);
+  });
+});
+
+describe("classifyChannels", () => {
+  it("chooses the strongest active emotion candidate", () => {
+    expect(
+      classifyChannels({
+        mouthOpen: 0,
+        smile: 0.6,
+        blinkLeft: 0,
+        blinkRight: 0,
+        anger: 0.8,
+        sorrow: 0.7,
+        surprise: 0,
+      }).emotion,
+    ).toBe("anger");
+  });
+
+  it("classifies eye and mouth channels independently", () => {
+    expect(
+      classifyChannels({
+        mouthOpen: 0.7,
+        smile: 0,
+        blinkLeft: 0.8,
+        blinkRight: 0.1,
+        anger: 0,
+        sorrow: 0,
+        surprise: 0,
+      }),
+    ).toEqual({
+      eyes: "wink_left",
+      mouth: "open",
+      emotion: "normal",
+    });
+  });
+});
+
+describe("composeExpression", () => {
+  it.each([
+    [{ eyes: "open", mouth: "closed", emotion: "normal" }, FFLExpression.Normal],
+    [{ eyes: "open", mouth: "open", emotion: "normal" }, FFLExpression.OpenMouth],
+    [{ eyes: "open", mouth: "closed", emotion: "smile" }, FFLExpression.Smile],
+    [{ eyes: "open", mouth: "open", emotion: "smile" }, FFLExpression.Happy],
+    [{ eyes: "open", mouth: "closed", emotion: "anger" }, FFLExpression.Anger],
+    [{ eyes: "open", mouth: "open", emotion: "anger" }, FFLExpression.AngerOpenMouth],
+    [{ eyes: "open", mouth: "closed", emotion: "sorrow" }, FFLExpression.Sorrow],
+    [
+      { eyes: "open", mouth: "open", emotion: "sorrow" },
+      FFLExpression.SorrowOpenMouth,
+    ],
+    [
+      { eyes: "open", mouth: "closed", emotion: "surprise" },
+      FFLExpression.Surprise,
+    ],
+    [
+      { eyes: "open", mouth: "open", emotion: "surprise" },
+      FFLExpression.SurpriseOpenMouth,
+    ],
+    [
+      { eyes: "blink_both", mouth: "closed", emotion: "normal" },
+      FFLExpression.Blink,
+    ],
+    [
+      { eyes: "blink_both", mouth: "open", emotion: "smile" },
+      FFLExpression.BlinkOpenMouth,
+    ],
+    [
+      { eyes: "wink_left", mouth: "closed", emotion: "normal" },
+      FFLExpression.WinkLeft,
+    ],
+    [
+      { eyes: "wink_left", mouth: "open", emotion: "anger" },
+      FFLExpression.WinkLeftOpenMouth,
+    ],
+    [
+      { eyes: "wink_right", mouth: "closed", emotion: "normal" },
+      FFLExpression.WinkRight,
+    ],
+    [
+      { eyes: "wink_right", mouth: "open", emotion: "sorrow" },
+      FFLExpression.WinkRightOpenMouth,
+    ],
+  ] as const)("composes %o to %s", (channels, expression) => {
+    expect(composeExpression(channels)).toBe(expression);
+  });
+
+  it("leaves Like and Frustrated expressions out of automatic composition", () => {
+    const automaticExpressions = new Set(
+      (["open", "blink_both", "wink_left", "wink_right"] as const).flatMap((eyes) =>
+        (["closed", "open"] as const).flatMap((mouth) =>
+          (["normal", "smile", "anger", "sorrow", "surprise"] as const).map(
+            (emotion) => composeExpression({ eyes, mouth, emotion }),
+          ),
+        ),
+      ),
+    );
+
+    expect(automaticExpressions.has(FFLExpression.Like)).toBe(false);
+    expect(automaticExpressions.has(FFLExpression.LikeWinkRight)).toBe(false);
+    expect(automaticExpressions.has(FFLExpression.Frustrated)).toBe(false);
   });
 });
 

@@ -25,6 +25,11 @@ export type AvatarSceneCallbacks = {
   onRenderFps?: (fps: number) => void;
 };
 
+export type AvatarBackground = {
+  color: string;
+  transparent: boolean;
+};
+
 export function expressionIndexFromVariantName(name: unknown): number | null {
   if (typeof name !== "string") return null;
 
@@ -55,6 +60,10 @@ export class AvatarScene {
   private debugMaterialsEnabled = false;
   private renderFrameCount = 0;
   private lastRenderFpsAt = performance.now();
+  private background: AvatarBackground = {
+    color: "#e8f0f7",
+    transparent: false,
+  };
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -164,9 +173,78 @@ export class AvatarScene {
     }
   }
 
+  setBackground(background: Partial<AvatarBackground>) {
+    this.background = {
+      ...this.background,
+      ...background,
+    };
+
+    this.scene.background = this.background.transparent
+      ? null
+      : new THREE.Color(this.background.color);
+    this.renderer.setClearAlpha(this.background.transparent ? 0 : 1);
+  }
+
   setTransparentBackground(enabled: boolean) {
-    this.scene.background = enabled ? null : AvatarScene.DEFAULT_BACKGROUND;
-    this.renderer.setClearAlpha(enabled ? 0 : 1);
+    this.setBackground({ transparent: enabled });
+  }
+
+  setBackgroundColor(color: string) {
+    this.setBackground({ color });
+  }
+
+  async captureJpegFrame(width: number, height: number): Promise<Uint8Array> {
+    return this.captureFrame(width, height, "image/jpeg", 0.92);
+  }
+
+  async capturePngFrame(width: number, height: number): Promise<Uint8Array> {
+    return this.captureFrame(width, height, "image/png");
+  }
+
+  private async captureFrame(
+    width: number,
+    height: number,
+    mimeType: "image/jpeg" | "image/png",
+    quality?: number,
+  ): Promise<Uint8Array> {
+    const currentSize = this.renderer.getSize(new THREE.Vector2());
+    const currentAspect = this.camera.aspect;
+    const currentBackground = this.scene.background;
+    const currentClearAlpha = this.renderer.getClearAlpha();
+
+    try {
+      this.renderer.setSize(width, height, false);
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+
+      if (mimeType === "image/jpeg" && this.background.transparent) {
+        // JPEG has no alpha channel. Flatten the OBS stream to the chosen color
+        // while keeping PNG snapshots and the preview canvas transparent.
+        this.scene.background = new THREE.Color(this.background.color);
+        this.renderer.setClearAlpha(1);
+      }
+
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        this.canvas.toBlob((result) => {
+          if (result) {
+            resolve(result);
+          } else {
+            reject(new Error("Could not capture output frame from canvas"));
+          }
+        }, mimeType, quality);
+      });
+
+      return new Uint8Array(await blob.arrayBuffer());
+    } finally {
+      this.renderer.setSize(currentSize.x, currentSize.y, false);
+      this.camera.aspect = currentAspect;
+      this.camera.updateProjectionMatrix();
+      this.scene.background = currentBackground;
+      this.renderer.setClearAlpha(currentClearAlpha);
+    }
   }
 
   resize() {

@@ -22,3 +22,22 @@
 - Chose separate render FPS and tracking FPS readouts because Three.js and MediaPipe run on different loops and need different performance diagnosis.
 - Chose a collapsed debug panel for tracking internals because expression tuning needs visibility without making the default import-and-track workflow feel like a diagnostics screen.
 - Chose to require expression variants before enabling tracking because Phase 2 expression animation depends on local Three.js material swaps, not just any loaded GLB.
+- Chose One-Euro filtering for Phase 3 blendshape smoothing because it suppresses neutral-face jitter while staying responsive to intentional expression changes.
+- Chose a JSON tuning profile as the Phase 3 mapper configuration boundary because thresholds, gains, smoothing, hold time, and calibration need to be edited live and saved together.
+- Chose a fixed-FPS webview frame producer with Rust-owned output session state for Phase 4 because tracking cadence and virtual camera cadence need to be decoupled before wiring a real OBS sink.
+- Chose max-of-mic-and-camera as the default mouth source because either voice amplitude or visible jaw movement should be able to open the Mii mouth.
+- Chose saved lip-sync calibration in the tuning profile because noise floor and speaking level depend on the user's microphone and room.
+- Chose an OBS clean-view mode before native virtual camera work because the lowest-risk Phase 4 path is OBS window capture feeding OBS Virtual Camera.
+- Chose solid output background by default with transparent as opt-in because OBS can preserve alpha but most conferencing apps expect opaque camera frames.
+- Chose a localhost JPEG/MJPEG output stream for the OBS-first Phase 4 path because OBS can consume a browser/media source without requiring a native Windows camera driver yet.
+- Chose advisory OBS detection over blocking output startup because the local MJPEG stream can still work with portable or non-standard OBS installs.
+- Chose to flatten transparent backgrounds to the selected solid color for the MJPEG output because JPEG cannot carry alpha; transparent capture remains available through OBS Clean View.
+- Confirmed OBS Browser Source reads the MJPEG stream but does not preserve transparency, so transparent compositing needs OBS Clean View or the PNG-backed transparent source page.
+- Chose a PNG-backed transparent OBS source page over changing MJPEG because MJPEG is efficient for opaque webcam output while PNG preserves alpha for OBS scene compositing.
+- Chose to preflight the Rust output server before starting output because OBS debugging should only begin after MiiTuber proves its own local MJPEG endpoint is alive.
+- Chose to allow only the Phase 4 output server port in the Tauri CSP because the webview needs to probe Rust's stream without broadening localhost access.
+- Chose effective-source fallback for mic-only lip-sync because camera jaw should keep working when microphone capture is stopped, denied, or unavailable.
+- Chose OBS Browser Source as the Phase 4 ingest path, not the final camera device, because OBS Virtual Camera already publishes the composed scene to Zoom/Discord while native "MiiTuber Camera" remains a Windows-specific stretch goal.
+- Chose to reject MJPEG requests while output is stopped and close streams on Stop Output because OBS should reflect the app's output session state instead of waiting on stale connections.
+- Chose native Windows "MiiTuber Camera" as the next output track after OBS-first verification because Mohammed wants the app to appear as its own webcam like VTube Studio.
+- Chose a read-only native camera status boundary before driver work because the app should clearly distinguish the working OBS stream from the future Windows device.

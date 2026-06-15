@@ -57,6 +57,7 @@ export type ExpressionResult = {
   expressionIndex: FFLExpression;
   headRotation: HeadRotation;
   scores: ExpressionScores;
+  channels: ExpressionChannels;
 };
 
 export type ExpressionScores = {
@@ -77,4 +78,16 @@ export type ExpressionSignals = {
   anger: boolean;
   sorrow: boolean;
   surprise: boolean;
+};
+
+export type EyeState = "open" | "blink_both" | "wink_left" | "wink_right";
+
+export type MouthState = "closed" | "open";
+
+export type EmotionState = "normal" | "smile" | "anger" | "sorrow" | "surprise";
+
+export type ExpressionChannels = {
+  eyes: EyeState;
+  mouth: MouthState;
+  emotion: EmotionState;
 };

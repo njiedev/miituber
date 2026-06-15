@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  BlendshapeSmoother,
   ExpressionSignalTracker,
   ExpressionStabilizer,
   HeadRotationSmoother,
   HysteresisTracker,
+  OneEuroFilter,
 } from "./smoothing";
 import { FFLExpression } from "./types";
+import { createDefaultTuningProfile } from "./tuningProfile";
 
 describe("ExpressionStabilizer", () => {
   it("holds the current expression until the minimum hold time passes", () => {
@@ -28,9 +31,9 @@ describe("HysteresisTracker", () => {
     const tracker = new HysteresisTracker(0.6, 0.4);
 
     expect(tracker.update(0.5)).toBe(false);
-    expect(tracker.update(0.7)).toBe(true);
+    expect(tracker.update(0.6)).toBe(true);
     expect(tracker.update(0.5)).toBe(true);
-    expect(tracker.update(0.3)).toBe(false);
+    expect(tracker.update(0.4)).toBe(false);
   });
 
   it("can reset to inactive", () => {
@@ -45,7 +48,7 @@ describe("HysteresisTracker", () => {
 
 describe("ExpressionSignalTracker", () => {
   it("keeps a smile active while its score hovers near the threshold", () => {
-    const tracker = new ExpressionSignalTracker();
+    const tracker = new ExpressionSignalTracker(createDefaultTuningProfile());
 
     expect(
       tracker.update({
@@ -95,5 +98,77 @@ describe("HeadRotationSmoother", () => {
       yaw: 0,
       roll: 0,
     });
+  });
+});
+
+describe("OneEuroFilter", () => {
+  it("returns the first sample unchanged", () => {
+    const filter = new OneEuroFilter();
+
+    expect(filter.update(0.4, 1000)).toBe(0.4);
+  });
+
+  it("smooths repeated samples toward the target", () => {
+    const filter = new OneEuroFilter({
+      minCutoff: 1,
+      beta: 0,
+      derivativeCutoff: 1,
+    });
+
+    filter.update(0, 0);
+    const firstStep = filter.update(1, 16);
+    const secondStep = filter.update(1, 32);
+
+    expect(firstStep).toBeGreaterThan(0);
+    expect(firstStep).toBeLessThan(1);
+    expect(secondStep).toBeGreaterThan(firstStep);
+    expect(secondStep).toBeLessThan(1);
+  });
+
+  it("responds faster when beta is higher", () => {
+    const slow = new OneEuroFilter({
+      minCutoff: 1,
+      beta: 0,
+      derivativeCutoff: 1,
+    });
+    const fast = new OneEuroFilter({
+      minCutoff: 1,
+      beta: 0.5,
+      derivativeCutoff: 1,
+    });
+
+    slow.update(0, 0);
+    fast.update(0, 0);
+
+    expect(fast.update(1, 16)).toBeGreaterThan(slow.update(1, 16));
+  });
+});
+
+describe("BlendshapeSmoother", () => {
+  it("keeps independent filters per blendshape category", () => {
+    const smoother = new BlendshapeSmoother({
+      minCutoff: 1,
+      beta: 0,
+      derivativeCutoff: 1,
+    });
+
+    smoother.update(
+      [
+        { categoryName: "jawOpen", score: 0 },
+        { categoryName: "mouthSmileLeft", score: 1 },
+      ],
+      0,
+    );
+    const result = smoother.update(
+      [
+        { categoryName: "jawOpen", score: 1 },
+        { categoryName: "mouthSmileLeft", score: 1 },
+      ],
+      16,
+    );
+
+    expect(result[0].score).toBeGreaterThan(0);
+    expect(result[0].score).toBeLessThan(1);
+    expect(result[1].score).toBe(1);
   });
 });

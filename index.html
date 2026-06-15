@@ -13,11 +13,11 @@
     <main class="app-shell">
       <section class="import-panel" aria-labelledby="app-title">
         <div>
-          <p class="eyebrow">Phase 2 prototype</p>
+          <p class="eyebrow">Phase 4 prototype</p>
           <h1 id="app-title">Animate a Wii-style avatar</h1>
           <p class="lede">
             Import a local .ffsd, render the 3D head through the local FFL
-            server, then start webcam tracking to drive expression and head pose.
+            server, then start webcam tracking and publish steady output frames.
           </p>
         </div>
 
@@ -52,6 +52,11 @@
             <input id="transparent-background" type="checkbox" />
             Transparent background
           </label>
+
+          <label>
+            Background color
+            <input id="background-color" type="color" value="#e8f0f7" />
+          </label>
         </div>
 
         <div class="tracking-controls" aria-label="Webcam tracking controls">
@@ -85,6 +90,10 @@
                 <dd id="debug-expression">0</dd>
               </div>
               <div>
+                <dt>Channels</dt>
+                <dd id="debug-channels">eyes open, mouth closed, emotion normal</dd>
+              </div>
+              <div>
                 <dt>Head</dt>
                 <dd id="debug-head-rotation">0 / 0 / 0</dd>
               </div>
@@ -108,8 +117,190 @@
                 <dt>Top inputs</dt>
                 <dd id="debug-top-blendshapes">none</dd>
               </div>
+              <div>
+                <dt>Hold</dt>
+                <dd>
+                  <span id="debug-hold-ms">0 ms</span>
+                  <span class="hold-meter" aria-hidden="true">
+                    <span id="debug-hold-meter"></span>
+                  </span>
+                </dd>
+              </div>
             </dl>
+            <div class="tuning-panel" aria-label="Expression tuning controls">
+              <div class="tuning-panel__header">
+                <h2>Tuning profile</h2>
+                <div class="tuning-actions">
+                  <button id="calibrate-button" type="button">Calibrate 2s</button>
+                  <button id="save-profile-button" type="button">Save JSON</button>
+                  <label class="load-profile-control">
+                    Load JSON
+                    <input id="load-profile-input" type="file" accept="application/json,.json" />
+                  </label>
+                </div>
+              </div>
+              <p id="calibration-status" data-tone="idle">
+                Calibration stores your neutral face baseline in the profile.
+              </p>
+              <p class="tuning-note">
+                Mouth enter/exit controls tune both camera jaw and mic lip-sync
+                hysteresis; Min hold ms controls expression switch hold time.
+              </p>
+              <div class="filter-controls">
+                <label>
+                  Min cutoff
+                  <input id="one-euro-min-cutoff" type="number" min="0.01" step="0.01" />
+                </label>
+                <label>
+                  Beta
+                  <input id="one-euro-beta" type="number" min="0" step="0.01" />
+                </label>
+                <label>
+                  Derivative cutoff
+                  <input id="one-euro-derivative-cutoff" type="number" min="0.01" step="0.01" />
+                </label>
+                <label>
+                  Min hold ms
+                  <input id="minimum-hold-ms" type="number" min="0" step="25" />
+                </label>
+                <label>
+                  Mic noise floor
+                  <input id="lip-sync-noise-floor" type="number" min="0" max="0.5" step="0.005" />
+                </label>
+                <label>
+                  Speaking level
+                  <input id="lip-sync-speaking-level" type="number" min="0.001" max="1" step="0.005" />
+                </label>
+                <label>
+                  Mic smoothing
+                  <input id="lip-sync-smoothing" type="number" min="0" max="1" step="0.01" />
+                </label>
+              </div>
+              <div id="signal-tuning-controls" class="signal-tuning-controls"></div>
+            </div>
+            <div class="blendshape-debug" aria-label="All raw and smoothed blendshape values">
+              <div class="blendshape-debug__header">
+                <h2>Blendshapes</h2>
+                <span id="debug-blendshape-count">0 / 52</span>
+              </div>
+              <div id="debug-blendshape-bars" class="blendshape-bars">
+                Start tracking to inspect raw vs smoothed MediaPipe face sliders.
+              </div>
+            </div>
           </details>
+        </div>
+        <div class="output-controls" aria-label="Virtual camera output controls">
+          <div class="output-controls__grid">
+            <label>
+              Output size
+              <select id="output-resolution-select">
+                <option value="1280x720">1280 x 720</option>
+                <option value="1920x1080">1920 x 1080</option>
+                <option value="640x360">640 x 360</option>
+              </select>
+            </label>
+            <label>
+              Output FPS
+              <select id="output-fps-select">
+                <option value="30">30</option>
+                <option value="60">60</option>
+              </select>
+            </label>
+          </div>
+          <div class="action-row">
+            <button id="toggle-clean-output-button" type="button" disabled>
+              Open OBS Clean View
+            </button>
+            <button id="start-output-button" type="button" disabled>
+              Start Output
+            </button>
+            <button id="stop-output-button" type="button" disabled>
+              Stop Output
+            </button>
+          </div>
+          <p id="output-status" data-tone="idle">
+            Render an avatar before starting virtual camera output.
+          </p>
+          <dl class="output-debug" aria-label="Output debug values">
+            <div>
+              <dt>Target</dt>
+              <dd id="debug-output-target">1280 x 720 @ 30</dd>
+            </div>
+            <div>
+              <dt>Output FPS</dt>
+              <dd id="debug-output-fps">0</dd>
+            </div>
+            <div>
+              <dt>Frames</dt>
+              <dd id="debug-output-frames">0</dd>
+            </div>
+            <div>
+              <dt>Dropped</dt>
+              <dd id="debug-output-dropped">0</dd>
+            </div>
+            <div>
+              <dt>Opaque OBS URL</dt>
+              <dd class="output-url-row">
+                <span id="debug-output-url">Start output to publish stream.</span>
+                <button id="copy-output-url-button" type="button" disabled>Copy</button>
+              </dd>
+            </div>
+            <div>
+              <dt>Transparent OBS URL</dt>
+              <dd class="output-url-row">
+                <span id="debug-output-transparent-url">Enable transparent output, then start output.</span>
+                <button id="copy-transparent-output-url-button" type="button" disabled>
+                  Copy
+                </button>
+              </dd>
+            </div>
+            <div>
+              <dt>OBS detected</dt>
+              <dd id="debug-output-obs">Not checked.</dd>
+            </div>
+            <div>
+              <dt>MiiTuber Camera</dt>
+              <dd id="debug-native-camera">Not checked.</dd>
+            </div>
+            <div>
+              <dt>Frame probe</dt>
+              <dd id="debug-output-probe">Not checked.</dd>
+            </div>
+          </dl>
+        </div>
+        <div class="lip-sync-controls" aria-label="Audio lip-sync controls">
+          <label>
+            Microphone
+            <select id="microphone-select">
+              <option value="">Default microphone</option>
+            </select>
+          </label>
+          <label>
+            Mouth source
+            <select id="mouth-source-select">
+              <option value="max">Mic + camera</option>
+              <option value="mic">Mic only</option>
+              <option value="camera">Camera only</option>
+            </select>
+          </label>
+          <div class="action-row">
+            <button id="start-lip-sync-button" type="button">Start Mic Lip-Sync</button>
+            <button id="calibrate-lip-sync-button" type="button" disabled>
+              Calibrate Silence
+            </button>
+            <button id="stop-lip-sync-button" type="button" disabled>
+              Stop Mic Lip-Sync
+            </button>
+          </div>
+          <p id="lip-sync-status" data-tone="idle">
+            Mic lip-sync is optional. Camera jaw tracking is still available.
+          </p>
+          <dl class="output-debug" aria-label="Lip-sync debug values">
+            <div>
+              <dt>Mouth</dt>
+              <dd id="debug-lip-sync-mouth">0.00</dd>
+            </div>
+          </dl>
         </div>
         <p id="status" data-tone="idle">
           Choose a .ffsd file to render before starting tracking. Current

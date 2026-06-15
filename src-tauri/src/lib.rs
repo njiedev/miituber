@@ -1,7 +1,12 @@
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    io::{Read, Write},
+    net::{SocketAddr, TcpListener, TcpStream},
+    path::Path,
+    sync::{Arc, Mutex, OnceLock},
+    thread,
+    time::Duration,
 };
 
 const FFL_STORE_DATA_LEN: usize = 96;
@@ -13,6 +18,13 @@ const CURRENT_MIIC_DATA_LEN: usize = 128;
 const RENDERER_IMAGE_URL: &str = "http://127.0.0.1:5000/miis/image.png";
 const RENDERER_GLB_URL: &str = "http://127.0.0.1:5000/miis/image.glb";
 const ALL_FFL_EXPRESSIONS: &str = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18";
+const OUTPUT_SERVER_ADDR: &str = "127.0.0.1:49321";
+const OUTPUT_FRAME_URL: &str = "http://127.0.0.1:49321/frame.jpg";
+const OUTPUT_PNG_FRAME_URL: &str = "http://127.0.0.1:49321/frame.png";
+const OUTPUT_MJPEG_URL: &str = "http://127.0.0.1:49321/stream.mjpeg";
+const OUTPUT_TRANSPARENT_SOURCE_URL: &str = "http://127.0.0.1:49321/source-transparent.html";
+const MJPEG_BOUNDARY: &str = "miituber-frame";
+const OUTPUT_SERVER_HOME_MARKER: &str = "MiiTuber output server";
 
 #[derive(serde::Serialize)]
 struct RendererStatus {
@@ -27,6 +39,77 @@ struct RenderCache {
 }
 
 type SharedRenderCache = Arc<RenderCache>;
+
+#[derive(Default)]
+struct VirtualCameraState {
+    session: Mutex<VirtualCameraSession>,
+    latest_jpeg: Mutex<Option<Vec<u8>>>,
+    latest_png: Mutex<Option<Vec<u8>>>,
+}
+
+#[derive(Default)]
+struct VirtualCameraSession {
+    running: bool,
+    width: u32,
+    height: u32,
+    fps: u32,
+    frame_count: u64,
+    last_frame_bytes: usize,
+    frame_url: String,
+    png_frame_url: String,
+    mjpeg_url: String,
+    transparent_source_url: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StartVirtualCameraRequest {
+    width: u32,
+    height: u32,
+    fps: u32,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PublishVirtualCameraFrameRequest {
+    width: u32,
+    height: u32,
+    fps: u32,
+    frame_index: u64,
+    jpeg_bytes: Vec<u8>,
+    png_bytes: Option<Vec<u8>>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VirtualCameraStatus {
+    running: bool,
+    supported: bool,
+    obs_detected: bool,
+    message: String,
+    width: u32,
+    height: u32,
+    fps: u32,
+    frame_count: u64,
+    last_frame_bytes: usize,
+    frame_url: String,
+    png_frame_url: String,
+    mjpeg_url: String,
+    transparent_source_url: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeCameraStatus {
+    platform_supported: bool,
+    device_installed: bool,
+    device_name: String,
+    message: String,
+}
+
+type SharedVirtualCameraState = Arc<VirtualCameraState>;
+
+static OUTPUT_SERVER_STARTED: OnceLock<()> = OnceLock::new();
 
 #[derive(Debug)]
 struct RendererPayload {
@@ -222,6 +305,494 @@ async fn check_renderer_status() -> RendererStatus {
     }
 }
 
+#[tauri::command]
+async fn start_virtual_camera(
+    request: StartVirtualCameraRequest,
+    state: tauri::State<'_, SharedVirtualCameraState>,
+) -> Result<VirtualCameraStatus, String> {
+    validate_output_settings(request.width, request.height, request.fps)?;
+    ensure_output_server_ready()?;
+
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Virtual camera state lock failed".to_string())?;
+    session.running = true;
+    session.width = request.width;
+    session.height = request.height;
+    session.fps = request.fps;
+    session.frame_count = 0;
+    session.last_frame_bytes = 0;
+    session.frame_url = OUTPUT_FRAME_URL.to_string();
+    session.png_frame_url = OUTPUT_PNG_FRAME_URL.to_string();
+    session.mjpeg_url = OUTPUT_MJPEG_URL.to_string();
+    session.transparent_source_url = OUTPUT_TRANSPARENT_SOURCE_URL.to_string();
+    clear_latest_output_frame(&state)?;
+
+    Ok(virtual_camera_status_from_session(&session))
+}
+
+#[tauri::command]
+async fn stop_virtual_camera(
+    state: tauri::State<'_, SharedVirtualCameraState>,
+) -> Result<VirtualCameraStatus, String> {
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Virtual camera state lock failed".to_string())?;
+    session.running = false;
+    session.frame_count = 0;
+    session.last_frame_bytes = 0;
+    clear_latest_output_frame(&state)?;
+
+    Ok(virtual_camera_status_from_session(&session))
+}
+
+#[tauri::command]
+async fn get_virtual_camera_status(
+    state: tauri::State<'_, SharedVirtualCameraState>,
+) -> Result<VirtualCameraStatus, String> {
+    let session = state
+        .session
+        .lock()
+        .map_err(|_| "Virtual camera state lock failed".to_string())?;
+
+    Ok(virtual_camera_status_from_session(&session))
+}
+
+#[tauri::command]
+async fn get_native_camera_status() -> NativeCameraStatus {
+    native_camera_status()
+}
+
+#[tauri::command]
+async fn publish_virtual_camera_frame(
+    request: PublishVirtualCameraFrameRequest,
+    state: tauri::State<'_, SharedVirtualCameraState>,
+) -> Result<VirtualCameraStatus, String> {
+    if !is_jpeg_frame(&request.jpeg_bytes) {
+        return Err("Output frame was not a JPEG image".to_string());
+    }
+
+    if let Some(png_bytes) = &request.png_bytes {
+        if !is_png_frame(png_bytes) {
+            return Err("Transparent output frame was not a PNG image".to_string());
+        }
+    }
+
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Virtual camera state lock failed".to_string())?;
+
+    if !session.running {
+        return Err("Virtual camera output is not running".to_string());
+    }
+
+    if request.width != session.width || request.height != session.height {
+        return Err(format!(
+            "Output frame size changed from {}x{} to {}x{}",
+            session.width, session.height, request.width, request.height
+        ));
+    }
+
+    if request.fps != session.fps {
+        return Err(format!(
+            "Output frame rate changed from {} fps to {} fps",
+            session.fps, request.fps
+        ));
+    }
+
+    session.frame_count = request.frame_index;
+    session.last_frame_bytes = request.jpeg_bytes.len();
+    *state
+        .latest_jpeg
+        .lock()
+        .map_err(|_| "Latest output frame lock failed".to_string())? = Some(request.jpeg_bytes);
+    *state
+        .latest_png
+        .lock()
+        .map_err(|_| "Latest transparent output frame lock failed".to_string())? =
+        request.png_bytes;
+
+    Ok(virtual_camera_status_from_session(&session))
+}
+
+fn virtual_camera_status_from_session(session: &VirtualCameraSession) -> VirtualCameraStatus {
+    let obs_detected = obs_installation_likely_available();
+    let message = if obs_detected {
+        format!("Local output stream is running. OBS appears to be installed; add Browser Source: {OUTPUT_MJPEG_URL}")
+    } else {
+        format!("Local output stream is running, but OBS was not detected in the usual Windows install paths. Install OBS Studio or use an existing OBS install, then add Browser Source: {OUTPUT_MJPEG_URL}")
+    };
+
+    VirtualCameraStatus {
+        running: session.running,
+        supported: true,
+        obs_detected,
+        message,
+        width: session.width,
+        height: session.height,
+        fps: session.fps,
+        frame_count: session.frame_count,
+        last_frame_bytes: session.last_frame_bytes,
+        frame_url: session.frame_url.clone(),
+        png_frame_url: session.png_frame_url.clone(),
+        mjpeg_url: session.mjpeg_url.clone(),
+        transparent_source_url: session.transparent_source_url.clone(),
+    }
+}
+
+fn native_camera_status() -> NativeCameraStatus {
+    let device_name = "MiiTuber Camera".to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        NativeCameraStatus {
+            platform_supported: true,
+            device_installed: false,
+            device_name,
+            message: "Native Windows camera device is not installed yet. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string(),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        NativeCameraStatus {
+            platform_supported: false,
+            device_installed: false,
+            device_name,
+            message:
+                "Native MiiTuber Camera is planned for Windows first; use the OBS output stream on this platform."
+                    .to_string(),
+        }
+    }
+}
+
+fn ensure_output_server_started(state: SharedVirtualCameraState) {
+    OUTPUT_SERVER_STARTED.get_or_init(|| {
+        thread::spawn(move || run_output_server(state));
+    });
+}
+
+fn run_output_server(state: SharedVirtualCameraState) {
+    let listener = match TcpListener::bind(OUTPUT_SERVER_ADDR) {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("output_server: could not bind {OUTPUT_SERVER_ADDR}: {error}");
+            return;
+        }
+    };
+
+    println!("output_server: serving frames on {OUTPUT_SERVER_ADDR}");
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                let state = Arc::clone(&state);
+                thread::spawn(move || handle_output_client(stream, state));
+            }
+            Err(error) => eprintln!("output_server: client accept failed: {error}"),
+        }
+    }
+}
+
+fn handle_output_client(mut stream: TcpStream, state: SharedVirtualCameraState) {
+    let mut request = [0_u8; 1024];
+    let read_len = match stream.read(&mut request) {
+        Ok(read_len) => read_len,
+        Err(error) => {
+            eprintln!("output_server: could not read request: {error}");
+            return;
+        }
+    };
+    let request = String::from_utf8_lossy(&request[..read_len]);
+    let path = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or("/");
+
+    match path {
+        "/frame.jpg" => write_latest_jpeg_response(&mut stream, &state),
+        "/frame.png" => write_latest_png_response(&mut stream, &state),
+        "/stream.mjpeg" => write_mjpeg_stream(&mut stream, &state),
+        "/source-transparent.html" => write_text_response(
+            &mut stream,
+            200,
+            "text/html; charset=utf-8",
+            transparent_source_html().as_bytes(),
+        ),
+        "/" => write_text_response(
+            &mut stream,
+            200,
+            "text/plain; charset=utf-8",
+            format!(
+                "{OUTPUT_SERVER_HOME_MARKER}\nJPEG: {OUTPUT_FRAME_URL}\nPNG: {OUTPUT_PNG_FRAME_URL}\nMJPEG: {OUTPUT_MJPEG_URL}\nTransparent OBS Source: {OUTPUT_TRANSPARENT_SOURCE_URL}\n"
+            )
+            .as_bytes(),
+        ),
+        _ => write_text_response(
+            &mut stream,
+            404,
+            "text/plain; charset=utf-8",
+            b"Not found. Use /frame.jpg, /frame.png, /stream.mjpeg, or /source-transparent.html.\n",
+        ),
+    }
+}
+
+fn write_latest_jpeg_response(stream: &mut TcpStream, state: &SharedVirtualCameraState) {
+    match latest_jpeg(state) {
+        Some(jpeg) => write_text_response(stream, 200, "image/jpeg", &jpeg),
+        None => write_text_response(
+            stream,
+            503,
+            "text/plain; charset=utf-8",
+            b"No MiiTuber output frame has been published yet.\n",
+        ),
+    }
+}
+
+fn write_latest_png_response(stream: &mut TcpStream, state: &SharedVirtualCameraState) {
+    match latest_png(state) {
+        Some(png) => write_text_response(stream, 200, "image/png", &png),
+        None => write_text_response(
+            stream,
+            503,
+            "text/plain; charset=utf-8",
+            b"No transparent MiiTuber output frame has been published yet. Enable transparent background and Start Output.\n",
+        ),
+    }
+}
+
+fn write_mjpeg_stream(stream: &mut TcpStream, state: &SharedVirtualCameraState) {
+    if !output_session_is_running(state) {
+        write_text_response(
+            stream,
+            503,
+            "text/plain; charset=utf-8",
+            b"MiiTuber output is not running. Click Start Output before opening the MJPEG stream.\n",
+        );
+        return;
+    }
+
+    let header = format!(
+        "HTTP/1.1 200 OK\r\nCache-Control: no-cache\r\nPragma: no-cache\r\nConnection: close\r\nContent-Type: multipart/x-mixed-replace; boundary={MJPEG_BOUNDARY}\r\n\r\n"
+    );
+    if stream.write_all(header.as_bytes()).is_err() {
+        return;
+    }
+
+    loop {
+        if !output_session_is_running(state) {
+            return;
+        }
+
+        let Some(jpeg) = latest_jpeg(state) else {
+            thread::sleep(Duration::from_millis(50));
+            continue;
+        };
+        let part_header = format!(
+            "--{MJPEG_BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
+            jpeg.len()
+        );
+
+        if stream.write_all(part_header.as_bytes()).is_err()
+            || stream.write_all(&jpeg).is_err()
+            || stream.write_all(b"\r\n").is_err()
+            || stream.flush().is_err()
+        {
+            return;
+        }
+
+        let fps = state
+            .session
+            .lock()
+            .map(|session| session.fps)
+            .unwrap_or(30);
+        thread::sleep(Duration::from_millis(1000 / u64::from(fps.max(1))));
+    }
+}
+
+fn transparent_source_html() -> String {
+    format!(
+        r#"<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html, body {{ margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }}
+body {{ display: grid; place-items: stretch; }}
+img {{ width: 100vw; height: 100vh; object-fit: contain; }}
+</style>
+</head>
+<body>
+<img id="frame" alt="MiiTuber transparent output">
+<script>
+const frame = document.getElementById("frame");
+let inFlight = false;
+async function updateFrame() {{
+  if (inFlight) {{
+    requestAnimationFrame(updateFrame);
+    return;
+  }}
+  inFlight = true;
+  frame.src = "/frame.png?t=" + Date.now();
+  frame.onload = frame.onerror = () => {{ inFlight = false; }};
+  requestAnimationFrame(updateFrame);
+}}
+updateFrame();
+</script>
+</body>
+</html>
+"#
+    )
+}
+
+fn output_session_is_running(state: &SharedVirtualCameraState) -> bool {
+    state
+        .session
+        .lock()
+        .map(|session| session.running)
+        .unwrap_or(false)
+}
+
+fn latest_png(state: &SharedVirtualCameraState) -> Option<Vec<u8>> {
+    state.latest_png.lock().ok().and_then(|frame| frame.clone())
+}
+
+fn latest_jpeg(state: &SharedVirtualCameraState) -> Option<Vec<u8>> {
+    state
+        .latest_jpeg
+        .lock()
+        .ok()
+        .and_then(|frame| frame.clone())
+}
+
+fn clear_latest_output_frame(state: &SharedVirtualCameraState) -> Result<(), String> {
+    *state
+        .latest_jpeg
+        .lock()
+        .map_err(|_| "Latest output frame lock failed".to_string())? = None;
+    *state
+        .latest_png
+        .lock()
+        .map_err(|_| "Latest transparent output frame lock failed".to_string())? = None;
+    Ok(())
+}
+
+fn is_jpeg_frame(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xff, 0xd8, 0xff])
+}
+
+fn is_png_frame(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+}
+
+fn write_text_response(stream: &mut TcpStream, status: u16, content_type: &str, body: &[u8]) {
+    let response = http_response_bytes(status, content_type, body);
+    let _ = stream.write_all(&response);
+}
+
+fn http_response_bytes(status: u16, content_type: &str, body: &[u8]) -> Vec<u8> {
+    let reason = match status {
+        200 => "OK",
+        404 => "Not Found",
+        503 => "Service Unavailable",
+        _ => "OK",
+    };
+    let header = format!(
+        "HTTP/1.1 {status} {reason}\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let mut response = Vec::with_capacity(header.len() + body.len());
+    response.extend_from_slice(header.as_bytes());
+    response.extend_from_slice(body);
+    response
+}
+
+fn validate_output_settings(width: u32, height: u32, fps: u32) -> Result<(), String> {
+    if width < 320 || height < 180 {
+        return Err("Output resolution must be at least 320x180".to_string());
+    }
+
+    if width > 3840 || height > 2160 {
+        return Err("Output resolution must be 3840x2160 or smaller".to_string());
+    }
+
+    if fps != 30 && fps != 60 {
+        return Err("Output FPS must be 30 or 60 for this Phase 4 path".to_string());
+    }
+
+    Ok(())
+}
+
+fn ensure_output_server_ready() -> Result<(), String> {
+    let addr: SocketAddr = OUTPUT_SERVER_ADDR
+        .parse()
+        .map_err(|_| "Output server address is invalid".to_string())?;
+
+    for _ in 0..10 {
+        if output_server_home_is_reachable(addr)? {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    Err(format!(
+        "MiiTuber output server is not responding on {OUTPUT_SERVER_ADDR}. Restart the app; if it keeps happening, another process may be using port 49321."
+    ))
+}
+
+fn output_server_home_is_reachable(addr: SocketAddr) -> Result<bool, String> {
+    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(200)) {
+        Ok(stream) => stream,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::NotConnected
+            ) =>
+        {
+            return Ok(false);
+        }
+        Err(error) => {
+            return Err(format!(
+                "Could not connect to MiiTuber output server on {OUTPUT_SERVER_ADDR}: {error}"
+            ));
+        }
+    };
+
+    stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| format!("Could not set output server read timeout: {error}"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| format!("Could not set output server write timeout: {error}"))?;
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .map_err(|error| format!("Could not query MiiTuber output server: {error}"))?;
+
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .map_err(|error| format!("Could not read MiiTuber output server response: {error}"))?;
+
+    Ok(output_server_home_response_is_ours(&response))
+}
+
+fn output_server_home_response_is_ours(response: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(response);
+    text.starts_with("HTTP/1.1 200 OK") && text.contains(OUTPUT_SERVER_HOME_MARKER)
+}
+
+fn obs_installation_likely_available() -> bool {
+    cfg!(target_os = "windows")
+        && (Path::new(r"C:\Program Files\obs-studio\bin\64bit\obs64.exe").exists()
+            || Path::new(r"C:\Program Files (x86)\obs-studio\bin\64bit\obs64.exe").exists())
+}
+
 fn compact_error_body(body: &str) -> String {
     let compact = body.split_whitespace().collect::<Vec<_>>().join(" ");
 
@@ -377,8 +948,13 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_ffsd_crc16, hex_encode, normalize_mii_data_for_renderer, FFL_STORE_DATA_LEN,
-        LEGACY_MIIC_DATA_LENS, STUDIO_ENCODED_LEN, STUDIO_RAW_LEN, SWITCH_CHAR_INFO_LEN,
+        calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
+        is_jpeg_frame, is_png_frame, latest_jpeg, latest_png, normalize_mii_data_for_renderer,
+        output_server_home_response_is_ours, output_session_is_running,
+        virtual_camera_status_from_session, SharedVirtualCameraState, VirtualCameraSession,
+        FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS, OUTPUT_FRAME_URL, OUTPUT_MJPEG_URL,
+        OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER, OUTPUT_TRANSPARENT_SOURCE_URL,
+        STUDIO_ENCODED_LEN, STUDIO_RAW_LEN, SWITCH_CHAR_INFO_LEN,
     };
 
     #[test]
@@ -446,17 +1022,141 @@ mod tests {
         assert_eq!(super::compact_error_body("bad\n\nrequest"), "bad request");
         assert_eq!(super::compact_error_body("   "), "(empty response body)");
     }
+
+    #[test]
+    fn detects_jpeg_output_frames() {
+        assert!(is_jpeg_frame(&[0xff, 0xd8, 0xff, 0xe0]));
+        assert!(!is_jpeg_frame(b"\x89PNG\r\n\x1a\n"));
+        assert!(!is_jpeg_frame(&[0xff, 0xd8]));
+    }
+
+    #[test]
+    fn detects_png_output_frames() {
+        assert!(is_png_frame(b"\x89PNG\r\n\x1a\nabc"));
+        assert!(!is_png_frame(&[0xff, 0xd8, 0xff, 0xe0]));
+        assert!(!is_png_frame(b"\x89PNG\r\n"));
+    }
+
+    #[test]
+    fn latest_jpeg_reads_published_frame_snapshot() {
+        let state = SharedVirtualCameraState::default();
+        *state.latest_jpeg.lock().unwrap() = Some(vec![0xff, 0xd8, 0xff, 0xe0]);
+
+        assert_eq!(latest_jpeg(&state), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
+    }
+
+    #[test]
+    fn clear_latest_output_frame_removes_stale_frame() {
+        let state = SharedVirtualCameraState::default();
+        *state.latest_jpeg.lock().unwrap() = Some(vec![0xff, 0xd8, 0xff, 0xe0]);
+        *state.latest_png.lock().unwrap() = Some(b"\x89PNG\r\n\x1a\n".to_vec());
+
+        clear_latest_output_frame(&state).unwrap();
+
+        assert_eq!(latest_jpeg(&state), None);
+        assert_eq!(latest_png(&state), None);
+    }
+
+    #[test]
+    fn output_session_running_reflects_session_state() {
+        let state = SharedVirtualCameraState::default();
+
+        assert!(!output_session_is_running(&state));
+
+        state.session.lock().unwrap().running = true;
+        assert!(output_session_is_running(&state));
+    }
+
+    #[test]
+    fn builds_http_response_with_content_type_and_length() {
+        let response = http_response_bytes(200, "image/jpeg", b"abc");
+        let text = String::from_utf8_lossy(&response);
+
+        assert!(text.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(text.contains("Content-Type: image/jpeg\r\n"));
+        assert!(text.contains("Content-Length: 3\r\n"));
+        assert!(text.ends_with("\r\n\r\nabc"));
+    }
+
+    #[test]
+    fn transparent_source_page_polls_png_with_transparent_background() {
+        let html = super::transparent_source_html();
+
+        assert!(html.contains("background: transparent"));
+        assert!(html.contains("/frame.png?t="));
+        assert!(html.contains("requestAnimationFrame(updateFrame)"));
+    }
+
+    #[test]
+    fn virtual_camera_status_keeps_local_stream_supported() {
+        let session = VirtualCameraSession {
+            running: true,
+            width: 1280,
+            height: 720,
+            fps: 30,
+            frame_count: 12,
+            last_frame_bytes: 4096,
+            frame_url: OUTPUT_FRAME_URL.to_string(),
+            png_frame_url: OUTPUT_PNG_FRAME_URL.to_string(),
+            mjpeg_url: OUTPUT_MJPEG_URL.to_string(),
+            transparent_source_url: OUTPUT_TRANSPARENT_SOURCE_URL.to_string(),
+        };
+
+        let status = virtual_camera_status_from_session(&session);
+
+        assert!(status.supported);
+        assert!(status.message.contains(OUTPUT_MJPEG_URL));
+        assert_eq!(status.frame_url, OUTPUT_FRAME_URL);
+        assert_eq!(status.png_frame_url, OUTPUT_PNG_FRAME_URL);
+        assert_eq!(status.mjpeg_url, OUTPUT_MJPEG_URL);
+        assert_eq!(status.transparent_source_url, OUTPUT_TRANSPARENT_SOURCE_URL);
+    }
+
+    #[test]
+    fn native_camera_status_is_explicit_about_install_state() {
+        let status = super::native_camera_status();
+
+        assert_eq!(status.device_name, "MiiTuber Camera");
+        assert!(!status.device_installed);
+        assert!(status.message.contains("OBS") || status.message.contains("Windows"));
+    }
+
+    #[test]
+    fn identifies_miituber_output_server_home_response() {
+        let response = http_response_bytes(
+            200,
+            "text/plain; charset=utf-8",
+            OUTPUT_SERVER_HOME_MARKER.as_bytes(),
+        );
+
+        assert!(output_server_home_response_is_ours(&response));
+        assert!(!output_server_home_response_is_ours(
+            b"HTTP/1.1 200 OK\r\n\r\nSome other server"
+        ));
+        assert!(!output_server_home_response_is_ours(
+            b"HTTP/1.1 404 Not Found\r\n\r\nMiiTuber output server"
+        ));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let virtual_camera_state = SharedVirtualCameraState::default();
+    ensure_output_server_started(Arc::clone(&virtual_camera_state));
+
     tauri::Builder::default()
         .manage(SharedRenderCache::default())
+        .manage(virtual_camera_state)
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             check_renderer_status,
+            get_native_camera_status,
+            get_virtual_camera_status,
+            publish_virtual_camera_frame,
             render_mii_glb,
-            render_mii_png
+            render_mii_png,
+            start_virtual_camera,
+            stop_virtual_camera
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

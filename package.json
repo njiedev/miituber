@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "verify:renderer-glb": "node scripts/verify-renderer-glb.mjs",
+    "verify:output-stream": "node scripts/verify-output-stream.mjs",
     "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri"
