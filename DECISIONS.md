@@ -43,3 +43,4 @@
 - Chose a read-only native camera status boundary before driver work because the app should clearly distinguish the working OBS stream from the future Windows device.
 - Chose a Rust `OutputFrameStore` boundary because OBS HTTP routes and the future native Windows camera should consume the same published frames without depending on each other.
 - Chose to publish optional raw RGBA frames to Rust because native camera sinks need camera-friendly pixel buffers and should not depend on MJPEG decoding.
+- Chose to gate raw RGBA capture on native sink readiness because the OBS path should not pay the bandwidth cost for frames no installed camera device consumes.

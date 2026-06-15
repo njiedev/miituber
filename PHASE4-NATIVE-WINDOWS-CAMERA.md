@@ -32,9 +32,11 @@ from the HTTP route handlers.
 4. Feed the sink on the existing fixed-FPS output cadence.
 5. Report native device availability separately from OBS availability.
 
-The webview now publishes raw RGBA bytes alongside the JPEG/PNG frames. This is
-larger than JPEG, but it gives the future Windows sink a camera-friendly buffer
-without coupling native output to MJPEG decoding.
+The webview can publish raw RGBA bytes alongside the JPEG/PNG frames. RGBA is
+much larger than JPEG, so the app only captures and sends it when
+`get_native_camera_status` reports `rawFrameSinkReady: true`. This gives the
+future Windows sink a camera-friendly buffer without making the OBS path pay the
+raw-frame cost.
 
 ## Windows Implementation Track
 

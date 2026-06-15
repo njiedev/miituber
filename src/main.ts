@@ -166,6 +166,7 @@ let latestExpressionScores: ExpressionScores = zeroExpressionScores();
 let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
 let outputFrameLoop: OutputFrameLoop | null = null;
 let currentOutputStatus: VirtualCameraStatus | null = null;
+let currentNativeCameraStatus: NativeCameraStatus | null = null;
 let currentOutputUrl: string | null = null;
 let currentTransparentOutputUrl: string | null = null;
 let outputFrameProbePending = false;
@@ -215,6 +216,7 @@ type VirtualCameraStatus = {
 type NativeCameraStatus = {
   platformSupported: boolean;
   deviceInstalled: boolean;
+  rawFrameSinkReady: boolean;
   deviceName: string;
   message: string;
 };
@@ -305,10 +307,12 @@ async function refreshRendererHealth() {
 async function refreshNativeCameraStatus() {
   try {
     const status = await invoke<NativeCameraStatus>("get_native_camera_status");
+    currentNativeCameraStatus = status;
     setNativeCameraStatus(status);
     logRenderEvent("native camera status checked", status);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    currentNativeCameraStatus = null;
     setNativeCameraStatus(null, `Could not check native camera: ${message}`);
     console.error("[MiiTuber] get_native_camera_status failed", { error, message });
   }
@@ -442,7 +446,9 @@ function setNativeCameraStatus(status: NativeCameraStatus | null, error?: string
   }
 
   if (status.deviceInstalled) {
-    debugNativeCameraEl.textContent = `${status.deviceName} installed.`;
+    debugNativeCameraEl.textContent = status.rawFrameSinkReady
+      ? `${status.deviceName} ready.`
+      : `${status.deviceName} installed, sink not ready.`;
     return;
   }
 
@@ -1349,7 +1355,9 @@ async function publishFrame(
   const pngFrame = transparentBackgroundInput?.checked
     ? await avatarScene.capturePngFrame(metadata.width, metadata.height)
     : null;
-  const rgbaFrame = avatarScene.captureRgbaFrame(metadata.width, metadata.height);
+  const rgbaFrame = currentNativeCameraStatus?.rawFrameSinkReady
+    ? avatarScene.captureRgbaFrame(metadata.width, metadata.height)
+    : null;
 
   await invoke<VirtualCameraStatus>("publish_virtual_camera_frame", {
     request: {
@@ -1359,7 +1367,7 @@ async function publishFrame(
       frameIndex: metadata.frameIndex,
       jpegBytes: Array.from(frame),
       pngBytes: pngFrame ? Array.from(pngFrame) : null,
-      rgbaBytes: Array.from(rgbaFrame),
+      rgbaBytes: rgbaFrame ? Array.from(rgbaFrame) : null,
     },
   });
 

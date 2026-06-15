@@ -166,6 +166,7 @@ struct VirtualCameraStatus {
 struct NativeCameraStatus {
     platform_supported: bool,
     device_installed: bool,
+    raw_frame_sink_ready: bool,
     device_name: String,
     message: String,
 }
@@ -516,6 +517,7 @@ fn native_camera_status() -> NativeCameraStatus {
         NativeCameraStatus {
             platform_supported: true,
             device_installed: false,
+            raw_frame_sink_ready: false,
             device_name,
             message: "Native Windows camera device is not installed yet. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string(),
         }
@@ -526,6 +528,7 @@ fn native_camera_status() -> NativeCameraStatus {
         NativeCameraStatus {
             platform_supported: false,
             device_installed: false,
+            raw_frame_sink_ready: false,
             device_name,
             message:
                 "Native MiiTuber Camera is planned for Windows first; use the OBS output stream on this platform."
