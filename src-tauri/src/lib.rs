@@ -1,6 +1,10 @@
+mod native_camera;
+
+use native_camera::{
+    native_camera_device_probe, native_camera_platform_probe, native_camera_status_from_sink,
+    NativeCameraSinkState, NativeCameraStatus,
+};
 use sha2::{Digest, Sha256};
-#[cfg(target_os = "windows")]
-use std::process::Command;
 use std::{
     collections::HashMap,
     io::{Read, Write},
@@ -27,8 +31,6 @@ const OUTPUT_MJPEG_URL: &str = "http://127.0.0.1:49321/stream.mjpeg";
 const OUTPUT_TRANSPARENT_SOURCE_URL: &str = "http://127.0.0.1:49321/source-transparent.html";
 const MJPEG_BOUNDARY: &str = "miituber-frame";
 const OUTPUT_SERVER_HOME_MARKER: &str = "MiiTuber output server";
-const NATIVE_CAMERA_DEVICE_NAME: &str = "MiiTuber Camera";
-const WINDOWS_VIRTUAL_CAMERA_MIN_BUILD: u32 = 22000;
 
 #[derive(serde::Serialize)]
 struct RendererStatus {
@@ -43,73 +45,6 @@ struct RenderCache {
 }
 
 type SharedRenderCache = Arc<RenderCache>;
-
-#[derive(Default)]
-struct NativeCameraSinkState {
-    device_probe_available: bool,
-    device_installed: bool,
-    raw_frame_sink_ready: bool,
-    width: u32,
-    height: u32,
-    fps: u32,
-    published_frame_count: u64,
-    last_frame_bytes: usize,
-}
-
-impl NativeCameraSinkState {
-    fn configure_output(&mut self, width: u32, height: u32, fps: u32) {
-        self.width = width;
-        self.height = height;
-        self.fps = fps;
-        self.published_frame_count = 0;
-        self.last_frame_bytes = 0;
-    }
-
-    fn clear_output(&mut self) {
-        self.width = 0;
-        self.height = 0;
-        self.fps = 0;
-        self.published_frame_count = 0;
-        self.last_frame_bytes = 0;
-    }
-
-    fn publish_raw_frame(
-        &mut self,
-        frame_index: u64,
-        rgba_bytes: Option<&[u8]>,
-    ) -> Result<(), String> {
-        if !self.raw_frame_sink_ready {
-            return Ok(());
-        }
-
-        let rgba_bytes = rgba_bytes.ok_or_else(|| {
-            "Native camera sink is ready, but no raw RGBA frame was provided".to_string()
-        })?;
-        let expected_len = self.expected_raw_frame_len()?;
-        if rgba_bytes.len() != expected_len {
-            return Err(format!(
-                "Native camera sink received {} raw RGBA bytes, expected {expected_len} for {}x{}",
-                rgba_bytes.len(),
-                self.width,
-                self.height
-            ));
-        }
-
-        self.published_frame_count = frame_index;
-        self.last_frame_bytes = rgba_bytes.len();
-        Ok(())
-    }
-
-    fn expected_raw_frame_len(&self) -> Result<usize, String> {
-        if self.width == 0 || self.height == 0 || self.fps == 0 {
-            return Err(
-                "Native camera sink is ready, but no output format is configured".to_string(),
-            );
-        }
-
-        expected_rgba_frame_len(self.width, self.height)
-    }
-}
 
 type SharedNativeCameraSinkState = Arc<Mutex<NativeCameraSinkState>>;
 
@@ -234,39 +169,9 @@ struct VirtualCameraStatus {
     transparent_source_url: String,
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NativeCameraStatus {
-    platform_supported: bool,
-    windows_virtual_camera_api_supported: bool,
-    windows_build: Option<u32>,
-    device_probe_available: bool,
-    device_installed: bool,
-    raw_frame_sink_ready: bool,
-    width: u32,
-    height: u32,
-    fps: u32,
-    published_frame_count: u64,
-    last_frame_bytes: usize,
-    device_name: String,
-    message: String,
-}
-
 type SharedVirtualCameraState = Arc<VirtualCameraState>;
 
 static OUTPUT_SERVER_STARTED: OnceLock<()> = OnceLock::new();
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct NativeCameraDeviceProbe {
-    available: bool,
-    installed: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct NativeCameraPlatformProbe {
-    windows_build: Option<u32>,
-    virtual_camera_api_supported: bool,
-}
 
 #[derive(Debug)]
 struct RendererPayload {
@@ -667,178 +572,6 @@ fn virtual_camera_status_from_session(session: &VirtualCameraSession) -> Virtual
         mjpeg_url: session.mjpeg_url.clone(),
         transparent_source_url: session.transparent_source_url.clone(),
     }
-}
-
-fn native_camera_status_from_sink(
-    sink: &NativeCameraSinkState,
-    windows_build: Option<u32>,
-    windows_virtual_camera_api_supported: bool,
-) -> NativeCameraStatus {
-    let device_name = NATIVE_CAMERA_DEVICE_NAME.to_string();
-    let raw_frame_sink_ready = sink.device_installed && sink.raw_frame_sink_ready;
-
-    #[cfg(target_os = "windows")]
-    {
-        NativeCameraStatus {
-            platform_supported: true,
-            windows_virtual_camera_api_supported,
-            windows_build,
-            device_probe_available: sink.device_probe_available,
-            device_installed: sink.device_installed,
-            raw_frame_sink_ready,
-            width: sink.width,
-            height: sink.height,
-            fps: sink.fps,
-            published_frame_count: sink.published_frame_count,
-            last_frame_bytes: sink.last_frame_bytes,
-            device_name,
-            message: native_camera_status_message(
-                sink,
-                raw_frame_sink_ready,
-                windows_build,
-                windows_virtual_camera_api_supported,
-            ),
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        NativeCameraStatus {
-            platform_supported: false,
-            windows_virtual_camera_api_supported: false,
-            windows_build: None,
-            device_probe_available: false,
-            device_installed: false,
-            raw_frame_sink_ready: false,
-            width: 0,
-            height: 0,
-            fps: 0,
-            published_frame_count: 0,
-            last_frame_bytes: 0,
-            device_name,
-            message:
-                "Native MiiTuber Camera is planned for Windows first; use the OBS output stream on this platform."
-                    .to_string(),
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn native_camera_platform_probe() -> NativeCameraPlatformProbe {
-    let script = "[Environment]::OSVersion.Version.Build";
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .output();
-
-    let windows_build = match output {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            parse_windows_build_number(&stdout)
-        }
-        Ok(output) => {
-            eprintln!(
-                "native_camera_platform_probe: PowerShell exited with status {:?}",
-                output.status.code()
-            );
-            None
-        }
-        Err(error) => {
-            eprintln!("native_camera_platform_probe: could not run PowerShell: {error}");
-            None
-        }
-    };
-
-    NativeCameraPlatformProbe {
-        windows_build,
-        virtual_camera_api_supported: windows_build
-            .is_some_and(|build| build >= WINDOWS_VIRTUAL_CAMERA_MIN_BUILD),
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn native_camera_platform_probe() -> NativeCameraPlatformProbe {
-    NativeCameraPlatformProbe {
-        windows_build: None,
-        virtual_camera_api_supported: false,
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn native_camera_status_message(
-    sink: &NativeCameraSinkState,
-    raw_frame_sink_ready: bool,
-    windows_build: Option<u32>,
-    windows_virtual_camera_api_supported: bool,
-) -> String {
-    if raw_frame_sink_ready {
-        "Native Windows camera sink is ready for raw frames.".to_string()
-    } else if !windows_virtual_camera_api_supported {
-        match windows_build {
-            Some(build) => format!(
-                "This Windows build ({build}) is below the Windows 11 virtual camera API floor ({WINDOWS_VIRTUAL_CAMERA_MIN_BUILD}). Use the OBS Browser Source path for now."
-            ),
-            None => "Could not check whether this Windows version supports the native virtual camera API. Use the OBS Browser Source path for now.".to_string(),
-        }
-    } else if !sink.device_probe_available {
-        "Could not check whether the native Windows camera device is installed. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string()
-    } else if sink.device_installed {
-        "Native Windows camera device is installed, but the frame sink is not ready yet. Use the OBS Browser Source path for now.".to_string()
-    } else {
-        "Native Windows camera device is not installed yet. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string()
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn native_camera_device_probe() -> NativeCameraDeviceProbe {
-    let script = "Get-PnpDevice -Class Camera,Image,Media -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FriendlyName";
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            NativeCameraDeviceProbe {
-                available: true,
-                installed: native_camera_device_list_contains_miituber(&stdout),
-            }
-        }
-        Ok(output) => {
-            eprintln!(
-                "native_camera_device_probe: PowerShell exited with status {:?}",
-                output.status.code()
-            );
-            NativeCameraDeviceProbe {
-                available: false,
-                installed: false,
-            }
-        }
-        Err(error) => {
-            eprintln!("native_camera_device_probe: could not run PowerShell: {error}");
-            NativeCameraDeviceProbe {
-                available: false,
-                installed: false,
-            }
-        }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn native_camera_device_probe() -> NativeCameraDeviceProbe {
-    NativeCameraDeviceProbe {
-        available: false,
-        installed: false,
-    }
-}
-
-fn native_camera_device_list_contains_miituber(device_list: &str) -> bool {
-    device_list
-        .lines()
-        .any(|line| line.trim().eq_ignore_ascii_case(NATIVE_CAMERA_DEVICE_NAME))
-}
-
-fn parse_windows_build_number(output: &str) -> Option<u32> {
-    output.lines().find_map(|line| line.trim().parse().ok())
 }
 
 fn ensure_output_server_started(state: SharedVirtualCameraState) {
@@ -1337,17 +1070,19 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::native_camera::{
+        native_camera_device_list_contains_miituber, native_camera_status_from_sink,
+        parse_windows_build_number, NativeCameraSinkState,
+    };
     use super::{
         calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
         is_jpeg_frame, is_png_frame, latest_jpeg, latest_png, latest_rgba,
-        native_camera_device_list_contains_miituber, native_camera_status_from_sink,
         normalize_mii_data_for_renderer, output_server_home_response_is_ours,
-        output_session_is_running, parse_windows_build_number, publish_output_frame,
-        start_output_session, stop_output_session, validate_rgba_frame,
-        virtual_camera_status_from_session, NativeCameraSinkState,
-        PublishVirtualCameraFrameRequest, SharedNativeCameraSinkState, SharedVirtualCameraState,
-        StartVirtualCameraRequest, VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS,
-        OUTPUT_FRAME_URL, OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
+        output_session_is_running, publish_output_frame, start_output_session, stop_output_session,
+        validate_rgba_frame, virtual_camera_status_from_session, PublishVirtualCameraFrameRequest,
+        SharedNativeCameraSinkState, SharedVirtualCameraState, StartVirtualCameraRequest,
+        VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS, OUTPUT_FRAME_URL,
+        OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
         OUTPUT_TRANSPARENT_SOURCE_URL, STUDIO_ENCODED_LEN, STUDIO_RAW_LEN, SWITCH_CHAR_INFO_LEN,
     };
 

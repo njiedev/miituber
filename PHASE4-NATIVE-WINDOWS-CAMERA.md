@@ -17,6 +17,8 @@ The app already has the right producer side:
   `OutputFrameStore`.
 - Rust owns a managed `NativeCameraSinkState` for eventual Windows device
   detection and raw-frame sink readiness.
+- Native camera state/probing/status logic now lives behind a dedicated Rust
+  `native_camera` module so the Media Foundation source code has a focused home.
 - On Windows, `get_native_camera_status` probes local PnP camera/media/image
   friendly names and marks `deviceInstalled` when `MiiTuber Camera` exists.
 - The native status also reports `deviceProbeAvailable` so a failed Windows
@@ -43,10 +45,12 @@ from the HTTP route handlers.
 
 1. Keep the OBS HTTP stream as the first proven transport.
 2. Add a Windows-only native camera sink behind the Rust output session.
-3. Convert each frame from the webview's encoded image format into the pixel
+3. Keep Windows-specific camera registration/source code inside the
+   `native_camera` module boundary.
+4. Convert each frame from the webview's encoded image format into the pixel
    format required by the Windows camera sink.
-4. Feed the sink on the existing fixed-FPS output cadence.
-5. Report native device availability separately from OBS availability.
+5. Feed the sink on the existing fixed-FPS output cadence.
+6. Report native device availability separately from OBS availability.
 
 The webview can publish raw RGBA bytes alongside the JPEG/PNG frames. RGBA is
 much larger than JPEG, so the app only captures and sends it when
