@@ -36,7 +36,8 @@ The webview can publish raw RGBA bytes alongside the JPEG/PNG frames. RGBA is
 much larger than JPEG, so the app only captures and sends it when
 `get_native_camera_status` reports `rawFrameSinkReady: true`. This gives the
 future Windows sink a camera-friendly buffer without making the OBS path pay the
-raw-frame cost.
+raw-frame cost. The output diagnostics show `Raw frames` so OBS testing can
+confirm the raw path is off until the native sink exists.
 
 ## Windows Implementation Track
 

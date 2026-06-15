@@ -14,6 +14,7 @@ Background: solid background recommended for MJPEG / OBS Virtual Camera
   with 19 expression variants on 2026-06-15.
 - [ ] MiiTuber loads the avatar and Start Output succeeds.
 - [ ] In-app Frame probe reports an OK JPEG.
+- [ ] In-app Raw frames reports `Off` while using the OBS Browser Source path.
 - [ ] `npm run verify:output-stream` reports one latest JPEG and three MJPEG frames.
   Observed verifier FPS:
 - [ ] Optional stronger FPS preflight:

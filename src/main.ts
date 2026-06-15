@@ -124,6 +124,7 @@ const debugOutputFramesEl =
   document.querySelector<HTMLElement>("#debug-output-frames");
 const debugOutputDroppedEl =
   document.querySelector<HTMLElement>("#debug-output-dropped");
+const debugOutputRawEl = document.querySelector<HTMLElement>("#debug-output-raw");
 const debugOutputUrlEl = document.querySelector<HTMLElement>("#debug-output-url");
 const debugOutputTransparentUrlEl = document.querySelector<HTMLElement>(
   "#debug-output-transparent-url",
@@ -405,6 +406,21 @@ function setOutputDebugValues(stats: OutputFrameLoopStats | null = null) {
   if (debugOutputDroppedEl) {
     debugOutputDroppedEl.textContent = stats ? String(stats.droppedFrames) : "0";
   }
+  updateRawFrameDebugValue();
+}
+
+function updateRawFrameDebugValue(status: VirtualCameraStatus | null = currentOutputStatus) {
+  if (!debugOutputRawEl) return;
+
+  if (!status?.running) {
+    debugOutputRawEl.textContent = "Off";
+    return;
+  }
+
+  debugOutputRawEl.textContent =
+    status.lastRgbaFrameBytes > 0
+      ? `${formatBytes(status.lastRgbaFrameBytes)} / frame`
+      : "Off";
 }
 
 function setOutputUrl(url: string | null) {
@@ -1311,6 +1327,7 @@ startOutputButton?.addEventListener("click", async () => {
       transparentBackgroundInput?.checked ? status.transparentSourceUrl : null,
     );
     setOutputObsDetected(status.obsDetected);
+    updateRawFrameDebugValue(status);
     logRenderEvent("virtual camera output started", settings);
   } catch (error) {
     outputFrameLoop = null;
@@ -1337,6 +1354,7 @@ async function stopOutput(message?: string) {
   setOutputUrl(null);
   setTransparentOutputUrl(null);
   setOutputObsDetected(null);
+  updateRawFrameDebugValue(null);
   setOutputProbe("Not checked.");
 
   try {
@@ -1359,7 +1377,7 @@ async function publishFrame(
     ? avatarScene.captureRgbaFrame(metadata.width, metadata.height)
     : null;
 
-  await invoke<VirtualCameraStatus>("publish_virtual_camera_frame", {
+  const status = await invoke<VirtualCameraStatus>("publish_virtual_camera_frame", {
     request: {
       width: metadata.width,
       height: metadata.height,
@@ -1370,6 +1388,8 @@ async function publishFrame(
       rgbaBytes: rgbaFrame ? Array.from(rgbaFrame) : null,
     },
   });
+  currentOutputStatus = status;
+  updateRawFrameDebugValue(status);
 
   if (outputFrameProbePending && outputFrameProbeUrl) {
     outputFrameProbePending = false;
@@ -1435,6 +1455,13 @@ function outputStatusMessage(status: VirtualCameraStatus) {
   }
 
   return status.message;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const kib = bytes / 1024;
+  if (kib < 1024) return `${kib.toFixed(1)} KiB`;
+  return `${(kib / 1024).toFixed(1)} MiB`;
 }
 
 function updateOutputTransparencyUi() {
