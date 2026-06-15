@@ -1078,10 +1078,11 @@ fn hex_encode(bytes: &[u8]) -> String {
 mod tests {
     use super::native_camera::{
         native_camera_bgra_stride_bytes, native_camera_device_list_contains_miituber,
-        native_camera_sample_duration_100ns, native_camera_sample_time_100ns,
-        native_camera_status_from_sink, parse_windows_build_number, rgba_to_bgra_frame,
-        start_native_camera_sink, stop_native_camera_sink, NativeCameraOutputConfig,
-        NativeCameraSinkState,
+        native_camera_registration_descriptor, native_camera_sample_duration_100ns,
+        native_camera_sample_time_100ns, native_camera_status_from_sink,
+        parse_windows_build_number, rgba_to_bgra_frame, start_native_camera_sink,
+        stop_native_camera_sink, NativeCameraOutputConfig, NativeCameraSinkState,
+        NATIVE_CAMERA_DEVICE_NAME, NATIVE_CAMERA_SOURCE_ID,
     };
     use super::{
         calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
@@ -1426,6 +1427,14 @@ mod tests {
             "MiiTuber Camera Helper\r\nOBS Virtual Camera\r\n"
         ));
         assert!(!native_camera_device_list_contains_miituber(""));
+    }
+
+    #[test]
+    fn native_camera_registration_descriptor_uses_stable_identity() {
+        let descriptor = native_camera_registration_descriptor();
+
+        assert_eq!(descriptor.friendly_name, NATIVE_CAMERA_DEVICE_NAME);
+        assert_eq!(descriptor.source_id, NATIVE_CAMERA_SOURCE_ID);
     }
 
     #[test]

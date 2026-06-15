@@ -44,6 +44,10 @@ The app already has the right producer side:
   can query `MFIsVirtualCameraTypeSupported` for software virtual cameras.
 - Native status reports whether that backend probe succeeded and whether Media
   Foundation says software virtual cameras are supported.
+- Native camera registration identity is centralized as friendly name
+  `MiiTuber Camera` and source id `miituber.native-camera.source`; the Windows
+  backend converts those values to null-terminated UTF-16 for
+  `MFCreateVirtualCamera`.
 - When raw-frame delivery is enabled, the native sink stores the latest BGRA
   frame snapshot, including frame index, resolution, fps, stride, Media
   Foundation 100ns sample timing, and bytes, for the future source to read.
@@ -92,7 +96,8 @@ The native camera will likely need one of these approaches:
 - Media Foundation virtual camera source via `MFCreateVirtualCamera`, preferred
   for Windows 11 build 22000+ because Microsoft documents it as a user-mode
   virtual camera path. The current backend wrapper only probes API support; it
-  does not register or start a camera source yet.
+  prepares stable registration strings but does not register or start a camera
+  source yet.
 - DirectShow virtual source filter, older but widely supported by conferencing
   apps and a possible fallback if Windows 10 support becomes necessary.
 

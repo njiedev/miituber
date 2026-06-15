@@ -61,3 +61,4 @@
 - Chose Media Foundation 100ns units for native frame sample time/duration because Windows samples expect timestamps in that convention and the conversion is deterministic from frame index and fps.
 - Chose a Windows-only Media Foundation backend wrapper before source registration because unsafe Windows API calls should be isolated and probed before wiring `MFCreateVirtualCamera` into output lifecycle.
 - Chose to expose Media Foundation backend probe state in native camera status because OS build support, backend API support, and installed device presence fail for different reasons.
+- Chose a stable native camera source id `miituber.native-camera.source` because `MFCreateVirtualCamera` registration should not depend on scattered ad hoc strings that could create duplicate or stale Windows devices.

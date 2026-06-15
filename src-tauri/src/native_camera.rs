@@ -5,6 +5,7 @@ mod windows_backend;
 use std::process::Command;
 
 pub(crate) const NATIVE_CAMERA_DEVICE_NAME: &str = "MiiTuber Camera";
+pub(crate) const NATIVE_CAMERA_SOURCE_ID: &str = "miituber.native-camera.source";
 const WINDOWS_VIRTUAL_CAMERA_MIN_BUILD: u32 = 22000;
 const MEDIA_TIME_UNITS_PER_SECOND: u64 = 10_000_000;
 
@@ -28,6 +29,12 @@ pub(crate) struct NativeCameraOutputConfig {
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) fps: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeCameraRegistrationDescriptor {
+    pub(crate) friendly_name: &'static str,
+    pub(crate) source_id: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -125,6 +132,13 @@ pub(crate) fn start_native_camera_sink(
     Ok(())
 }
 
+pub(crate) fn native_camera_registration_descriptor() -> NativeCameraRegistrationDescriptor {
+    NativeCameraRegistrationDescriptor {
+        friendly_name: NATIVE_CAMERA_DEVICE_NAME,
+        source_id: NATIVE_CAMERA_SOURCE_ID,
+    }
+}
+
 pub(crate) fn stop_native_camera_sink(sink: &mut NativeCameraSinkState) {
     sink.raw_frame_sink_ready = false;
     sink.clear_output();
@@ -176,8 +190,29 @@ fn native_camera_sink_ready_for_config(
 ) -> bool {
     let _ = (sink, config);
     let _ = native_camera_backend_probe();
+    let _ = native_camera_registration_ready();
 
     false
+}
+
+fn native_camera_registration_ready() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let descriptor = native_camera_registration_descriptor();
+        match windows_backend::WindowsVirtualCameraRegistrationStrings::from_descriptor(&descriptor)
+        {
+            Ok(_) => true,
+            Err(error) => {
+                eprintln!("native_camera_registration_ready: {error}");
+                false
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
