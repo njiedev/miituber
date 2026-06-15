@@ -49,3 +49,4 @@
 - Chose to configure the native sink on Start Output because a Windows camera sink needs the active width, height, and fps before accepting raw frames.
 - Chose to validate raw frames against the native sink's configured output format because the sink should defend its own device contract, not rely only on caller-side validation.
 - Chose Windows PnP friendly-name probing for first native camera detection because it can confirm whether `MiiTuber Camera` is installed before driver/source implementation lands.
+- Chose effective native readiness as device-installed AND sink-ready because raw frames should not start flowing when the OS cannot expose the camera device.

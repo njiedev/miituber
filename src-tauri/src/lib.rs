@@ -535,6 +535,9 @@ async fn get_native_camera_status(
         .lock()
         .map(|mut state| {
             state.device_installed = native_camera_device_installed();
+            if !state.device_installed {
+                state.raw_frame_sink_ready = false;
+            }
             NativeCameraSinkState {
                 device_installed: state.device_installed,
                 raw_frame_sink_ready: state.raw_frame_sink_ready,
@@ -643,20 +646,21 @@ fn virtual_camera_status_from_session(session: &VirtualCameraSession) -> Virtual
 
 fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraStatus {
     let device_name = NATIVE_CAMERA_DEVICE_NAME.to_string();
+    let raw_frame_sink_ready = sink.device_installed && sink.raw_frame_sink_ready;
 
     #[cfg(target_os = "windows")]
     {
         NativeCameraStatus {
             platform_supported: true,
             device_installed: sink.device_installed,
-            raw_frame_sink_ready: sink.raw_frame_sink_ready,
+            raw_frame_sink_ready,
             width: sink.width,
             height: sink.height,
             fps: sink.fps,
             published_frame_count: sink.published_frame_count,
             last_frame_bytes: sink.last_frame_bytes,
             device_name,
-            message: native_camera_status_message(sink),
+            message: native_camera_status_message(sink, raw_frame_sink_ready),
         }
     }
 
@@ -680,8 +684,11 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
 }
 
 #[cfg(target_os = "windows")]
-fn native_camera_status_message(sink: &NativeCameraSinkState) -> String {
-    if sink.raw_frame_sink_ready {
+fn native_camera_status_message(
+    sink: &NativeCameraSinkState,
+    raw_frame_sink_ready: bool,
+) -> String {
+    if raw_frame_sink_ready {
         "Native Windows camera sink is ready for raw frames.".to_string()
     } else if sink.device_installed {
         "Native Windows camera device is installed, but the frame sink is not ready yet. Use the OBS Browser Source path for now.".to_string()
@@ -1572,6 +1579,22 @@ mod tests {
             assert!(!status.device_installed);
             assert!(!status.raw_frame_sink_ready);
         }
+    }
+
+    #[test]
+    fn native_camera_status_does_not_report_ready_without_device() {
+        let status = native_camera_status_from_sink(&NativeCameraSinkState {
+            device_installed: false,
+            raw_frame_sink_ready: true,
+            width: 1280,
+            height: 720,
+            fps: 30,
+            published_frame_count: 7,
+            last_frame_bytes: 16,
+        });
+
+        assert!(!status.device_installed);
+        assert!(!status.raw_frame_sink_ready);
     }
 
     #[test]

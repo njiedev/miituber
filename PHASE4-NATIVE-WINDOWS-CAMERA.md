@@ -19,6 +19,8 @@ The app already has the right producer side:
   detection and raw-frame sink readiness.
 - On Windows, `get_native_camera_status` probes local PnP camera/media/image
   friendly names and marks `deviceInstalled` when `MiiTuber Camera` exists.
+- Raw-frame readiness is reported only when both the device is installed and the
+  native sink says it is ready.
 - Start Output configures `NativeCameraSinkState` with the current width,
   height, and fps; Stop Output clears that format and frame counters.
 - `publish_virtual_camera_frame` already calls the native sink handoff hook;
