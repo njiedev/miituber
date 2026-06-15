@@ -1,31 +1,124 @@
 #![cfg_attr(not(windows), allow(non_snake_case))]
 
-use std::ffi::c_void;
+use std::{
+    ffi::c_void,
+    ptr,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 pub const MIITUBER_CAMERA_SOURCE_CLSID: &str = "{8F9F43F5-5B8C-4C4B-A8A9-26B4E58D2F8B}";
 
+const S_OK: i32 = 0x0000_0000;
 const S_FALSE: i32 = 0x0000_0001;
 const CLASS_E_CLASSNOTAVAILABLE: i32 = 0x8004_0111_u32 as i32;
+const E_NOINTERFACE: i32 = 0x8000_4002_u32 as i32;
 const E_NOTIMPL: i32 = 0x8000_4001_u32 as i32;
 const E_POINTER: i32 = 0x8000_4003_u32 as i32;
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Guid {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+const IID_IUNKNOWN: Guid = Guid {
+    data1: 0x0000_0000,
+    data2: 0x0000,
+    data3: 0x0000,
+    data4: [0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46],
+};
+
+const IID_ICLASS_FACTORY: Guid = Guid {
+    data1: 0x0000_0001,
+    data2: 0x0000,
+    data3: 0x0000,
+    data4: [0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46],
+};
+
+const CLSID_MIITUBER_CAMERA_SOURCE: Guid = Guid {
+    data1: 0x8f9f_43f5,
+    data2: 0x5b8c,
+    data3: 0x4c4b,
+    data4: [0xa8, 0xa9, 0x26, 0xb4, 0xe5, 0x8d, 0x2f, 0x8b],
+};
+
+#[repr(C)]
+struct ClassFactory {
+    vtable: &'static ClassFactoryVTable,
+    refs: AtomicU32,
+}
+
+#[repr(C)]
+struct ClassFactoryVTable {
+    query_interface: unsafe extern "system" fn(
+        this: *mut ClassFactory,
+        interface_id: *const Guid,
+        object: *mut *mut c_void,
+    ) -> i32,
+    add_ref: unsafe extern "system" fn(this: *mut ClassFactory) -> u32,
+    release: unsafe extern "system" fn(this: *mut ClassFactory) -> u32,
+    create_instance: unsafe extern "system" fn(
+        this: *mut ClassFactory,
+        outer: *mut c_void,
+        interface_id: *const Guid,
+        object: *mut *mut c_void,
+    ) -> i32,
+    lock_server: unsafe extern "system" fn(this: *mut ClassFactory, lock: bool) -> i32,
+}
+
+static ACTIVE_COM_OBJECTS: AtomicU32 = AtomicU32::new(0);
+static SERVER_LOCKS: AtomicU32 = AtomicU32::new(0);
+
+static CLASS_FACTORY_VTABLE: ClassFactoryVTable = ClassFactoryVTable {
+    query_interface: class_factory_query_interface,
+    add_ref: class_factory_add_ref,
+    release: class_factory_release,
+    create_instance: class_factory_create_instance,
+    lock_server: class_factory_lock_server,
+};
+
 #[no_mangle]
 pub unsafe extern "system" fn DllGetClassObject(
-    _class_id: *const c_void,
-    _interface_id: *const c_void,
+    class_id: *const Guid,
+    interface_id: *const Guid,
     class_factory: *mut *mut c_void,
 ) -> i32 {
     if class_factory.is_null() {
         return E_POINTER;
     }
+    *class_factory = ptr::null_mut();
 
-    *class_factory = std::ptr::null_mut();
-    CLASS_E_CLASSNOTAVAILABLE
+    if class_id.is_null() || interface_id.is_null() {
+        return E_POINTER;
+    }
+
+    if *class_id != CLSID_MIITUBER_CAMERA_SOURCE {
+        return CLASS_E_CLASSNOTAVAILABLE;
+    }
+
+    if !is_class_factory_interface(*interface_id) {
+        return E_NOINTERFACE;
+    }
+
+    let factory = Box::new(ClassFactory {
+        vtable: &CLASS_FACTORY_VTABLE,
+        refs: AtomicU32::new(1),
+    });
+    ACTIVE_COM_OBJECTS.fetch_add(1, Ordering::SeqCst);
+    *class_factory = Box::into_raw(factory).cast::<c_void>();
+    S_OK
 }
 
 #[no_mangle]
 pub extern "system" fn DllCanUnloadNow() -> i32 {
-    S_FALSE
+    if ACTIVE_COM_OBJECTS.load(Ordering::SeqCst) == 0 && SERVER_LOCKS.load(Ordering::SeqCst) == 0 {
+        S_OK
+    } else {
+        S_FALSE
+    }
 }
 
 #[no_mangle]
@@ -38,13 +131,92 @@ pub extern "system" fn DllUnregisterServer() -> i32 {
     E_NOTIMPL
 }
 
+unsafe extern "system" fn class_factory_query_interface(
+    this: *mut ClassFactory,
+    interface_id: *const Guid,
+    object: *mut *mut c_void,
+) -> i32 {
+    if this.is_null() || interface_id.is_null() || object.is_null() {
+        return E_POINTER;
+    }
+    *object = ptr::null_mut();
+
+    if !is_class_factory_interface(*interface_id) {
+        return E_NOINTERFACE;
+    }
+
+    class_factory_add_ref(this);
+    *object = this.cast::<c_void>();
+    S_OK
+}
+
+unsafe extern "system" fn class_factory_add_ref(this: *mut ClassFactory) -> u32 {
+    if this.is_null() {
+        return 0;
+    }
+
+    (*this).refs.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+unsafe extern "system" fn class_factory_release(this: *mut ClassFactory) -> u32 {
+    if this.is_null() {
+        return 0;
+    }
+
+    let refs = (*this).refs.fetch_sub(1, Ordering::SeqCst) - 1;
+    if refs == 0 {
+        ACTIVE_COM_OBJECTS.fetch_sub(1, Ordering::SeqCst);
+        drop(Box::from_raw(this));
+    }
+
+    refs
+}
+
+unsafe extern "system" fn class_factory_create_instance(
+    _this: *mut ClassFactory,
+    _outer: *mut c_void,
+    _interface_id: *const Guid,
+    object: *mut *mut c_void,
+) -> i32 {
+    if object.is_null() {
+        return E_POINTER;
+    }
+
+    *object = ptr::null_mut();
+    E_NOTIMPL
+}
+
+unsafe extern "system" fn class_factory_lock_server(_this: *mut ClassFactory, lock: bool) -> i32 {
+    if lock {
+        SERVER_LOCKS.fetch_add(1, Ordering::SeqCst);
+    } else {
+        let _ = SERVER_LOCKS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |locks| {
+            locks.checked_sub(1)
+        });
+    }
+
+    S_OK
+}
+
+fn is_class_factory_interface(interface_id: Guid) -> bool {
+    interface_id == IID_IUNKNOWN || interface_id == IID_ICLASS_FACTORY
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        DllCanUnloadNow, DllGetClassObject, DllRegisterServer, DllUnregisterServer,
-        CLASS_E_CLASSNOTAVAILABLE, E_NOTIMPL, E_POINTER, MIITUBER_CAMERA_SOURCE_CLSID, S_FALSE,
+        ClassFactory, DllCanUnloadNow, DllGetClassObject, DllRegisterServer, DllUnregisterServer,
+        Guid, CLASS_E_CLASSNOTAVAILABLE, CLSID_MIITUBER_CAMERA_SOURCE, E_NOINTERFACE, E_NOTIMPL,
+        E_POINTER, IID_ICLASS_FACTORY, IID_IUNKNOWN, MIITUBER_CAMERA_SOURCE_CLSID, S_FALSE, S_OK,
     };
     use std::ffi::c_void;
+
+    const IID_UNSUPPORTED: Guid = Guid {
+        data1: 0x1111_1111,
+        data2: 0x2222,
+        data3: 0x3333,
+        data4: [0x44, 0x44, 0x55, 0x55, 0x66, 0x66, 0x77, 0x77],
+    };
 
     #[test]
     fn source_clsid_matches_miituber_registration_identity() {
@@ -52,30 +224,149 @@ mod tests {
             MIITUBER_CAMERA_SOURCE_CLSID,
             "{8F9F43F5-5B8C-4C4B-A8A9-26B4E58D2F8B}"
         );
+        assert_eq!(CLSID_MIITUBER_CAMERA_SOURCE.data1, 0x8f9f_43f5);
+        assert_eq!(CLSID_MIITUBER_CAMERA_SOURCE.data2, 0x5b8c);
+        assert_eq!(CLSID_MIITUBER_CAMERA_SOURCE.data3, 0x4c4b);
     }
 
     #[test]
-    fn class_factory_export_is_explicitly_unavailable_until_source_exists() {
-        let mut class_factory: *mut c_void = std::ptr::dangling_mut();
+    fn class_factory_export_returns_factory_for_miituber_source_clsid() {
+        let mut class_factory: *mut c_void = std::ptr::null_mut();
 
         let result = unsafe {
             DllGetClassObject(
-                std::ptr::null(),
-                std::ptr::null(),
-                &mut class_factory as *mut *mut c_void,
+                &CLSID_MIITUBER_CAMERA_SOURCE,
+                &IID_ICLASS_FACTORY,
+                &mut class_factory,
             )
         };
+
+        assert_eq!(result, S_OK);
+        assert!(!class_factory.is_null());
+        unsafe {
+            release_factory(class_factory);
+        }
+    }
+
+    #[test]
+    fn class_factory_export_supports_iunknown_request() {
+        let mut class_factory: *mut c_void = std::ptr::null_mut();
+
+        let result = unsafe {
+            DllGetClassObject(
+                &CLSID_MIITUBER_CAMERA_SOURCE,
+                &IID_IUNKNOWN,
+                &mut class_factory,
+            )
+        };
+
+        assert_eq!(result, S_OK);
+        assert!(!class_factory.is_null());
+        unsafe {
+            release_factory(class_factory);
+        }
+    }
+
+    #[test]
+    fn class_factory_export_rejects_unknown_clsid() {
+        let mut class_factory: *mut c_void = std::ptr::dangling_mut();
+
+        let result =
+            unsafe { DllGetClassObject(&IID_UNSUPPORTED, &IID_ICLASS_FACTORY, &mut class_factory) };
 
         assert_eq!(result, CLASS_E_CLASSNOTAVAILABLE);
         assert!(class_factory.is_null());
     }
 
     #[test]
+    fn class_factory_export_rejects_unsupported_interface() {
+        let mut class_factory: *mut c_void = std::ptr::dangling_mut();
+
+        let result = unsafe {
+            DllGetClassObject(
+                &CLSID_MIITUBER_CAMERA_SOURCE,
+                &IID_UNSUPPORTED,
+                &mut class_factory,
+            )
+        };
+
+        assert_eq!(result, E_NOINTERFACE);
+        assert!(class_factory.is_null());
+    }
+
+    #[test]
     fn class_factory_export_rejects_null_output_pointer() {
-        let result =
-            unsafe { DllGetClassObject(std::ptr::null(), std::ptr::null(), std::ptr::null_mut()) };
+        let result = unsafe {
+            DllGetClassObject(
+                &CLSID_MIITUBER_CAMERA_SOURCE,
+                &IID_ICLASS_FACTORY,
+                std::ptr::null_mut(),
+            )
+        };
 
         assert_eq!(result, E_POINTER);
+    }
+
+    #[test]
+    fn class_factory_create_instance_is_disabled_until_media_source_exists() {
+        let class_factory = create_factory();
+        let factory = class_factory.cast::<ClassFactory>();
+        let mut source: *mut c_void = std::ptr::dangling_mut();
+
+        let result = unsafe {
+            ((*(*factory).vtable).create_instance)(
+                factory,
+                std::ptr::null_mut(),
+                &IID_IUNKNOWN,
+                &mut source,
+            )
+        };
+
+        assert_eq!(result, E_NOTIMPL);
+        assert!(source.is_null());
+        unsafe {
+            release_factory(class_factory);
+        }
+    }
+
+    #[test]
+    fn query_interface_adds_a_reference_for_supported_interfaces() {
+        let class_factory = create_factory();
+        let factory = class_factory.cast::<ClassFactory>();
+        let mut queried: *mut c_void = std::ptr::null_mut();
+
+        let result =
+            unsafe { ((*(*factory).vtable).query_interface)(factory, &IID_IUNKNOWN, &mut queried) };
+
+        assert_eq!(result, S_OK);
+        assert_eq!(queried, class_factory);
+        unsafe {
+            assert_eq!(((*(*factory).vtable).release)(factory), 1);
+            assert_eq!(((*(*factory).vtable).release)(factory), 0);
+        }
+    }
+
+    #[test]
+    fn dll_unload_reflects_factory_lifetime_and_locks() {
+        assert_eq!(DllCanUnloadNow(), S_OK);
+        let class_factory = create_factory();
+        assert_eq!(DllCanUnloadNow(), S_FALSE);
+
+        let factory = class_factory.cast::<ClassFactory>();
+        unsafe {
+            assert_eq!(((*(*factory).vtable).lock_server)(factory, true), S_OK);
+        }
+        assert_eq!(DllCanUnloadNow(), S_FALSE);
+
+        unsafe {
+            assert_eq!(((*(*factory).vtable).lock_server)(factory, false), S_OK);
+        }
+        assert_eq!(DllCanUnloadNow(), S_FALSE);
+
+        unsafe {
+            assert_eq!(((*(*factory).vtable).release)(factory), 0);
+        }
+        assert_eq!(DllCanUnloadNow(), S_OK);
     }
 
     #[test]
@@ -84,8 +375,24 @@ mod tests {
         assert_eq!(DllUnregisterServer(), E_NOTIMPL);
     }
 
-    #[test]
-    fn dll_stays_loaded_until_reference_tracking_exists() {
-        assert_eq!(DllCanUnloadNow(), S_FALSE);
+    fn create_factory() -> *mut c_void {
+        let mut class_factory: *mut c_void = std::ptr::null_mut();
+
+        let result = unsafe {
+            DllGetClassObject(
+                &CLSID_MIITUBER_CAMERA_SOURCE,
+                &IID_ICLASS_FACTORY,
+                &mut class_factory,
+            )
+        };
+
+        assert_eq!(result, S_OK);
+        assert!(!class_factory.is_null());
+        class_factory
+    }
+
+    unsafe fn release_factory(class_factory: *mut c_void) {
+        let factory = class_factory.cast::<ClassFactory>();
+        ((*(*factory).vtable).release)(factory);
     }
 }
