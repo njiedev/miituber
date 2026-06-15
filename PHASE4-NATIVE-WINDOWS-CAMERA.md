@@ -56,6 +56,10 @@ The app already has the right producer side:
   `HKEY_CLASSES_ROOT\CLSID\{8F9F43F5-5B8C-4C4B-A8A9-26B4E58D2F8B}\InprocServer32`.
   This is separate from device probing because the COM source class must exist
   before Windows can activate the virtual camera source.
+- The repo now has a separate `src-tauri/native-camera-source` cdylib crate for
+  the COM DLL that Windows Camera Frame Server will load. It exports the standard
+  COM DLL entry points, shares the same CLSID, and intentionally returns
+  "not implemented / class unavailable" until the `IMFMediaSource` exists.
 - When raw-frame delivery is enabled, the native sink stores the latest BGRA
   frame snapshot, including frame index, resolution, fps, stride, Media
   Foundation 100ns sample timing, and bytes, for the future source to read.
@@ -126,8 +130,9 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
 - Use the OBS path to finish the Phase 4 live proof.
 - Then replace the dormant lifecycle hook with actual Windows camera
   registration/start/stop work. The first guarded registration wrapper exists;
-  the next step is implementing and registering the Media Foundation source class
-  that can serve BGRA samples when Windows activates the CLSID.
+  the source DLL boundary now exists; the next step is implementing the class
+  factory plus `IMFMediaSource` / `IMFMediaStream` so the DLL can serve BGRA
+  samples when Windows activates the CLSID.
 
 ## Acceptance Proof
 
