@@ -80,10 +80,29 @@ impl NativeCameraSinkState {
         let rgba_bytes = rgba_bytes.ok_or_else(|| {
             "Native camera sink is ready, but no raw RGBA frame was provided".to_string()
         })?;
+        let expected_len = self.expected_raw_frame_len()?;
+        if rgba_bytes.len() != expected_len {
+            return Err(format!(
+                "Native camera sink received {} raw RGBA bytes, expected {expected_len} for {}x{}",
+                rgba_bytes.len(),
+                self.width,
+                self.height
+            ));
+        }
 
         self.published_frame_count = frame_index;
         self.last_frame_bytes = rgba_bytes.len();
         Ok(())
+    }
+
+    fn expected_raw_frame_len(&self) -> Result<usize, String> {
+        if self.width == 0 || self.height == 0 || self.fps == 0 {
+            return Err(
+                "Native camera sink is ready, but no output format is configured".to_string(),
+            );
+        }
+
+        expected_rgba_frame_len(self.width, self.height)
     }
 }
 
@@ -1388,11 +1407,11 @@ mod tests {
 
     #[test]
     fn stop_output_session_clears_native_sink_format_and_counters() {
-        let output_state = running_output_state(1280, 720, 30);
+        let output_state = running_output_state(2, 2, 30);
         let native_sink = SharedNativeCameraSinkState::default();
         {
             let mut sink = native_sink.lock().unwrap();
-            sink.configure_output(1280, 720, 30);
+            sink.configure_output(2, 2, 30);
             sink.raw_frame_sink_ready = true;
             sink.publish_raw_frame(12, Some(&[0; 16])).unwrap();
         }
@@ -1529,9 +1548,9 @@ mod tests {
         let mut sink = NativeCameraSinkState {
             device_installed: true,
             raw_frame_sink_ready: true,
-            width: 0,
-            height: 0,
-            fps: 0,
+            width: 2,
+            height: 2,
+            fps: 30,
             published_frame_count: 0,
             last_frame_bytes: 0,
         };
@@ -1544,6 +1563,42 @@ mod tests {
     }
 
     #[test]
+    fn native_camera_sink_requires_configured_format_when_ready() {
+        let mut sink = NativeCameraSinkState {
+            device_installed: true,
+            raw_frame_sink_ready: true,
+            width: 0,
+            height: 0,
+            fps: 0,
+            published_frame_count: 0,
+            last_frame_bytes: 0,
+        };
+
+        let error = sink.publish_raw_frame(7, Some(&[0; 16])).unwrap_err();
+
+        assert!(error.contains("no output format"));
+        assert_eq!(sink.published_frame_count, 0);
+    }
+
+    #[test]
+    fn native_camera_sink_rejects_wrong_raw_frame_size() {
+        let mut sink = NativeCameraSinkState {
+            device_installed: true,
+            raw_frame_sink_ready: true,
+            width: 2,
+            height: 2,
+            fps: 30,
+            published_frame_count: 0,
+            last_frame_bytes: 0,
+        };
+
+        let error = sink.publish_raw_frame(7, Some(&[0; 15])).unwrap_err();
+
+        assert!(error.contains("expected 16"));
+        assert_eq!(sink.published_frame_count, 0);
+    }
+
+    #[test]
     fn publish_output_frame_hands_raw_frame_to_ready_native_sink() {
         let output_state = running_output_state(2, 2, 30);
         let native_sink = SharedNativeCameraSinkState::default();
@@ -1551,6 +1606,7 @@ mod tests {
             let mut sink = native_sink.lock().unwrap();
             sink.device_installed = true;
             sink.raw_frame_sink_ready = true;
+            sink.configure_output(2, 2, 30);
         }
 
         let status = publish_output_frame(
