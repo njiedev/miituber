@@ -15,6 +15,8 @@ The app already has the right producer side:
 - Rust receives each published frame through `publish_virtual_camera_frame`.
 - Rust stores the latest opaque, transparent, and raw RGBA frames in
   `OutputFrameStore`.
+- Rust owns a managed `NativeCameraSinkState` for eventual Windows device
+  detection and raw-frame sink readiness.
 - Rust currently exposes those frames through JPEG/MJPEG/PNG HTTP endpoints for
   OBS Browser Source.
 

@@ -41,6 +41,14 @@ struct RenderCache {
 type SharedRenderCache = Arc<RenderCache>;
 
 #[derive(Default)]
+struct NativeCameraSinkState {
+    device_installed: bool,
+    raw_frame_sink_ready: bool,
+}
+
+type SharedNativeCameraSinkState = Arc<Mutex<NativeCameraSinkState>>;
+
+#[derive(Default)]
 struct VirtualCameraState {
     session: Mutex<VirtualCameraSession>,
     frames: OutputFrameStore,
@@ -427,8 +435,18 @@ async fn get_virtual_camera_status(
 }
 
 #[tauri::command]
-async fn get_native_camera_status() -> NativeCameraStatus {
-    native_camera_status()
+async fn get_native_camera_status(
+    native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
+) -> Result<NativeCameraStatus, String> {
+    let native_sink = native_sink
+        .lock()
+        .map(|state| NativeCameraSinkState {
+            device_installed: state.device_installed,
+            raw_frame_sink_ready: state.raw_frame_sink_ready,
+        })
+        .map_err(|_| "Native camera sink state lock failed".to_string())?;
+
+    Ok(native_camera_status_from_sink(&native_sink))
 }
 
 #[tauri::command]
@@ -509,17 +527,17 @@ fn virtual_camera_status_from_session(session: &VirtualCameraSession) -> Virtual
     }
 }
 
-fn native_camera_status() -> NativeCameraStatus {
+fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraStatus {
     let device_name = "MiiTuber Camera".to_string();
 
     #[cfg(target_os = "windows")]
     {
         NativeCameraStatus {
             platform_supported: true,
-            device_installed: false,
-            raw_frame_sink_ready: false,
+            device_installed: sink.device_installed,
+            raw_frame_sink_ready: sink.raw_frame_sink_ready,
             device_name,
-            message: "Native Windows camera device is not installed yet. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string(),
+            message: native_camera_status_message(sink),
         }
     }
 
@@ -534,6 +552,17 @@ fn native_camera_status() -> NativeCameraStatus {
                 "Native MiiTuber Camera is planned for Windows first; use the OBS output stream on this platform."
                     .to_string(),
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn native_camera_status_message(sink: &NativeCameraSinkState) -> String {
+    if sink.raw_frame_sink_ready {
+        "Native Windows camera sink is ready for raw frames.".to_string()
+    } else if sink.device_installed {
+        "Native Windows camera device is installed, but the frame sink is not ready yet. Use the OBS Browser Source path for now.".to_string()
+    } else {
+        "Native Windows camera device is not installed yet. Use the OBS Browser Source path for now; the Windows camera sink will attach to the same output frames.".to_string()
     }
 }
 
@@ -1036,10 +1065,11 @@ mod tests {
     use super::{
         calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
         is_jpeg_frame, is_png_frame, latest_jpeg, latest_png, latest_rgba,
-        normalize_mii_data_for_renderer, output_server_home_response_is_ours,
-        output_session_is_running, validate_rgba_frame, virtual_camera_status_from_session,
-        SharedVirtualCameraState, VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS,
-        OUTPUT_FRAME_URL, OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
+        native_camera_status_from_sink, normalize_mii_data_for_renderer,
+        output_server_home_response_is_ours, output_session_is_running, validate_rgba_frame,
+        virtual_camera_status_from_session, NativeCameraSinkState, SharedVirtualCameraState,
+        VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS, OUTPUT_FRAME_URL,
+        OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
         OUTPUT_TRANSPARENT_SOURCE_URL, STUDIO_ENCODED_LEN, STUDIO_RAW_LEN, SWITCH_CHAR_INFO_LEN,
     };
 
@@ -1244,11 +1274,36 @@ mod tests {
 
     #[test]
     fn native_camera_status_is_explicit_about_install_state() {
-        let status = super::native_camera_status();
+        let status = native_camera_status_from_sink(&NativeCameraSinkState::default());
 
         assert_eq!(status.device_name, "MiiTuber Camera");
         assert!(!status.device_installed);
+        assert!(!status.raw_frame_sink_ready);
         assert!(status.message.contains("OBS") || status.message.contains("Windows"));
+    }
+
+    #[test]
+    fn native_camera_status_reflects_sink_readiness() {
+        let status = native_camera_status_from_sink(&NativeCameraSinkState {
+            device_installed: true,
+            raw_frame_sink_ready: true,
+        });
+
+        assert_eq!(status.device_name, "MiiTuber Camera");
+
+        #[cfg(target_os = "windows")]
+        {
+            assert!(status.platform_supported);
+            assert!(status.device_installed);
+            assert!(status.raw_frame_sink_ready);
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert!(!status.platform_supported);
+            assert!(!status.device_installed);
+            assert!(!status.raw_frame_sink_ready);
+        }
     }
 
     #[test]
@@ -1276,6 +1331,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(SharedRenderCache::default())
+        .manage(SharedNativeCameraSinkState::default())
         .manage(virtual_camera_state)
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
