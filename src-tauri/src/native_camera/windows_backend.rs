@@ -1,6 +1,9 @@
 use super::NativeCameraRegistrationDescriptor;
+use windows::core::PCWSTR;
 use windows::Win32::Media::MediaFoundation::{
-    MFIsVirtualCameraTypeSupported, MFVirtualCameraType_SoftwareCameraSource,
+    IMFVirtualCamera, MFCreateVirtualCamera, MFIsVirtualCameraTypeSupported,
+    MFVirtualCameraAccess_CurrentUser, MFVirtualCameraLifetime_Session,
+    MFVirtualCameraType_SoftwareCameraSource,
 };
 
 pub(crate) fn software_virtual_camera_type_supported() -> Result<bool, String> {
@@ -11,6 +14,47 @@ pub(crate) fn software_virtual_camera_type_supported() -> Result<bool, String> {
             })?;
 
     Ok(supported.as_bool())
+}
+
+#[allow(dead_code)]
+pub(crate) fn create_and_remove_session_virtual_camera(
+    descriptor: &NativeCameraRegistrationDescriptor,
+) -> Result<(), String> {
+    let registration = WindowsVirtualCameraRegistration::create_session(descriptor)?;
+    registration.remove()
+}
+
+#[allow(dead_code)]
+pub(crate) struct WindowsVirtualCameraRegistration {
+    camera: IMFVirtualCamera,
+}
+
+impl WindowsVirtualCameraRegistration {
+    #[allow(dead_code)]
+    pub(crate) fn create_session(
+        descriptor: &NativeCameraRegistrationDescriptor,
+    ) -> Result<Self, String> {
+        let strings = WindowsVirtualCameraRegistrationStrings::from_descriptor(descriptor)?;
+        let camera = unsafe {
+            MFCreateVirtualCamera(
+                MFVirtualCameraType_SoftwareCameraSource,
+                MFVirtualCameraLifetime_Session,
+                MFVirtualCameraAccess_CurrentUser,
+                PCWSTR(strings.friendly_name_wide.as_ptr()),
+                PCWSTR(strings.source_id_wide.as_ptr()),
+                None,
+            )
+        }
+        .map_err(|error| format!("Could not create Media Foundation virtual camera: {error}"))?;
+
+        Ok(Self { camera })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn remove(self) -> Result<(), String> {
+        unsafe { self.camera.Remove() }
+            .map_err(|error| format!("Could not remove Media Foundation virtual camera: {error}"))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -43,7 +87,10 @@ fn nul_terminated_utf16(value: &str) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
-    use super::{nul_terminated_utf16, WindowsVirtualCameraRegistrationStrings};
+    use super::{
+        create_and_remove_session_virtual_camera, nul_terminated_utf16,
+        software_virtual_camera_type_supported, WindowsVirtualCameraRegistrationStrings,
+    };
     use crate::native_camera::{
         native_camera_registration_descriptor, NativeCameraRegistrationDescriptor,
         NATIVE_CAMERA_DEVICE_NAME, NATIVE_CAMERA_SOURCE_ID,
@@ -84,5 +131,16 @@ mod tests {
         };
 
         assert!(WindowsVirtualCameraRegistrationStrings::from_descriptor(&descriptor).is_err());
+    }
+
+    #[test]
+    #[ignore = "creates and removes a Windows session virtual camera"]
+    fn creates_and_removes_session_virtual_camera() {
+        if !software_virtual_camera_type_supported().unwrap_or(false) {
+            return;
+        }
+
+        create_and_remove_session_virtual_camera(&native_camera_registration_descriptor())
+            .expect("session virtual camera should create and remove cleanly");
     }
 }

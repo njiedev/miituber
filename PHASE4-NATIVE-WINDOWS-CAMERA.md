@@ -48,6 +48,10 @@ The app already has the right producer side:
   `MiiTuber Camera` and source id `miituber.native-camera.source`; the Windows
   backend converts those values to null-terminated UTF-16 for
   `MFCreateVirtualCamera`.
+- The Windows backend now has a guarded `MFCreateVirtualCamera` wrapper that can
+  create and immediately remove a session-lifetime, current-user virtual camera
+  registration for `MiiTuber Camera`. The automated test is ignored by default
+  because it touches OS camera registration state.
 - When raw-frame delivery is enabled, the native sink stores the latest BGRA
   frame snapshot, including frame index, resolution, fps, stride, Media
   Foundation 100ns sample timing, and bytes, for the future source to read.
@@ -95,9 +99,9 @@ The native camera will likely need one of these approaches:
 
 - Media Foundation virtual camera source via `MFCreateVirtualCamera`, preferred
   for Windows 11 build 22000+ because Microsoft documents it as a user-mode
-  virtual camera path. The current backend wrapper only probes API support; it
-  prepares stable registration strings but does not register or start a camera
-  source yet.
+  virtual camera path. The current backend wrapper probes API support, prepares
+  stable registration strings, and exposes an ignored create/remove registration
+  proof, but does not start a frame-producing camera source yet.
 - DirectShow virtual source filter, older but widely supported by conferencing
   apps and a possible fallback if Windows 10 support becomes necessary.
 
@@ -115,7 +119,8 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
 - Show a separate "could not check" state if Windows camera probing fails.
 - Use the OBS path to finish the Phase 4 live proof.
 - Then replace the dormant lifecycle hook with actual Windows camera
-  registration/start/stop work.
+  registration/start/stop work. The first guarded registration wrapper exists;
+  the next step is a real Media Foundation source that can serve BGRA samples.
 
 ## Acceptance Proof
 
