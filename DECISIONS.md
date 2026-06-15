@@ -54,3 +54,4 @@
 - Chose to expose native camera probe availability separately from install state because failure to query Windows devices is not the same as `MiiTuber Camera` being missing.
 - Chose Windows 11 `MFCreateVirtualCamera` as the first native camera API target because Microsoft documents it as a user-mode virtual camera path, with DirectShow left as the Windows 10 fallback question.
 - Chose a dedicated Rust `native_camera` module before Media Foundation work because Windows camera registration, probing, and frame sink state need a focused boundary away from the Tauri command and HTTP output server code.
+- Chose native camera lifecycle hooks that configure output but keep raw-frame readiness false until a real Media Foundation sink exists because finding a device name is not the same as having a writable camera source.

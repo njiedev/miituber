@@ -16,8 +16,15 @@ pub(crate) struct NativeCameraSinkState {
     pub(crate) last_frame_bytes: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NativeCameraOutputConfig {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) fps: u32,
+}
+
 impl NativeCameraSinkState {
-    pub(crate) fn configure_output(&mut self, width: u32, height: u32, fps: u32) {
+    fn configure_output(&mut self, width: u32, height: u32, fps: u32) {
         self.width = width;
         self.height = height;
         self.fps = fps;
@@ -25,7 +32,7 @@ impl NativeCameraSinkState {
         self.last_frame_bytes = 0;
     }
 
-    pub(crate) fn clear_output(&mut self) {
+    fn clear_output(&mut self) {
         self.width = 0;
         self.height = 0;
         self.fps = 0;
@@ -69,6 +76,29 @@ impl NativeCameraSinkState {
 
         crate::expected_rgba_frame_len(self.width, self.height)
     }
+}
+
+pub(crate) fn start_native_camera_sink(
+    sink: &mut NativeCameraSinkState,
+    config: NativeCameraOutputConfig,
+) -> Result<(), String> {
+    sink.configure_output(config.width, config.height, config.fps);
+    sink.raw_frame_sink_ready = native_camera_sink_ready_for_config(sink, config);
+    Ok(())
+}
+
+pub(crate) fn stop_native_camera_sink(sink: &mut NativeCameraSinkState) {
+    sink.raw_frame_sink_ready = false;
+    sink.clear_output();
+}
+
+fn native_camera_sink_ready_for_config(
+    sink: &NativeCameraSinkState,
+    config: NativeCameraOutputConfig,
+) -> bool {
+    let _ = (sink, config);
+
+    false
 }
 
 #[derive(serde::Serialize)]

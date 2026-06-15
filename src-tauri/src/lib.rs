@@ -2,6 +2,7 @@ mod native_camera;
 
 use native_camera::{
     native_camera_device_probe, native_camera_platform_probe, native_camera_status_from_sink,
+    start_native_camera_sink, stop_native_camera_sink, NativeCameraOutputConfig,
     NativeCameraSinkState, NativeCameraStatus,
 };
 use sha2::{Digest, Sha256};
@@ -399,10 +400,19 @@ fn start_output_session(
     session.png_frame_url = OUTPUT_PNG_FRAME_URL.to_string();
     session.mjpeg_url = OUTPUT_MJPEG_URL.to_string();
     session.transparent_source_url = OUTPUT_TRANSPARENT_SOURCE_URL.to_string();
-    native_sink
-        .lock()
-        .map_err(|_| "Native camera sink state lock failed".to_string())?
-        .configure_output(request.width, request.height, request.fps);
+    {
+        let mut native_sink = native_sink
+            .lock()
+            .map_err(|_| "Native camera sink state lock failed".to_string())?;
+        start_native_camera_sink(
+            &mut native_sink,
+            NativeCameraOutputConfig {
+                width: request.width,
+                height: request.height,
+                fps: request.fps,
+            },
+        )?;
+    }
     clear_latest_output_frame(&state)?;
 
     Ok(virtual_camera_status_from_session(&session))
@@ -428,10 +438,12 @@ fn stop_output_session(
     session.frame_count = 0;
     session.last_frame_bytes = 0;
     session.last_rgba_frame_bytes = 0;
-    native_sink
-        .lock()
-        .map_err(|_| "Native camera sink state lock failed".to_string())?
-        .clear_output();
+    {
+        let mut native_sink = native_sink
+            .lock()
+            .map_err(|_| "Native camera sink state lock failed".to_string())?;
+        stop_native_camera_sink(&mut native_sink);
+    }
     clear_latest_output_frame(&state)?;
 
     Ok(virtual_camera_status_from_session(&session))
@@ -1072,7 +1084,8 @@ fn hex_encode(bytes: &[u8]) -> String {
 mod tests {
     use super::native_camera::{
         native_camera_device_list_contains_miituber, native_camera_status_from_sink,
-        parse_windows_build_number, NativeCameraSinkState,
+        parse_windows_build_number, start_native_camera_sink, stop_native_camera_sink,
+        NativeCameraOutputConfig, NativeCameraSinkState,
     };
     use super::{
         calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
@@ -1296,6 +1309,7 @@ mod tests {
         assert_eq!(sink.width, 1280);
         assert_eq!(sink.height, 720);
         assert_eq!(sink.fps, 30);
+        assert!(!sink.raw_frame_sink_ready);
     }
 
     #[test]
@@ -1304,8 +1318,10 @@ mod tests {
         let native_sink = SharedNativeCameraSinkState::default();
         {
             let mut sink = native_sink.lock().unwrap();
-            sink.configure_output(2, 2, 30);
             sink.raw_frame_sink_ready = true;
+            sink.width = 2;
+            sink.height = 2;
+            sink.fps = 30;
             sink.publish_raw_frame(12, Some(&[0; 16])).unwrap();
         }
 
@@ -1316,6 +1332,7 @@ mod tests {
         assert_eq!(sink.width, 0);
         assert_eq!(sink.height, 0);
         assert_eq!(sink.fps, 0);
+        assert!(!sink.raw_frame_sink_ready);
         assert_eq!(sink.published_frame_count, 0);
         assert_eq!(sink.last_frame_bytes, 0);
     }
@@ -1517,18 +1534,28 @@ mod tests {
     fn native_camera_sink_tracks_configured_output_format() {
         let mut sink = NativeCameraSinkState::default();
 
-        sink.configure_output(1280, 720, 30);
+        start_native_camera_sink(
+            &mut sink,
+            NativeCameraOutputConfig {
+                width: 1280,
+                height: 720,
+                fps: 30,
+            },
+        )
+        .unwrap();
 
         assert_eq!(sink.width, 1280);
         assert_eq!(sink.height, 720);
         assert_eq!(sink.fps, 30);
+        assert!(!sink.raw_frame_sink_ready);
 
         sink.publish_raw_frame(7, None).unwrap();
-        sink.clear_output();
+        stop_native_camera_sink(&mut sink);
 
         assert_eq!(sink.width, 0);
         assert_eq!(sink.height, 0);
         assert_eq!(sink.fps, 0);
+        assert!(!sink.raw_frame_sink_ready);
         assert_eq!(sink.published_frame_count, 0);
         assert_eq!(sink.last_frame_bytes, 0);
     }
@@ -1599,7 +1626,9 @@ mod tests {
             let mut sink = native_sink.lock().unwrap();
             sink.device_installed = true;
             sink.raw_frame_sink_ready = true;
-            sink.configure_output(2, 2, 30);
+            sink.width = 2;
+            sink.height = 2;
+            sink.fps = 30;
         }
 
         let status = publish_output_frame(
@@ -1620,7 +1649,13 @@ mod tests {
     fn publish_output_frame_requires_raw_frame_when_native_sink_is_ready() {
         let output_state = running_output_state(2, 2, 30);
         let native_sink = SharedNativeCameraSinkState::default();
-        native_sink.lock().unwrap().raw_frame_sink_ready = true;
+        {
+            let mut sink = native_sink.lock().unwrap();
+            sink.raw_frame_sink_ready = true;
+            sink.width = 2;
+            sink.height = 2;
+            sink.fps = 30;
+        }
 
         let error = match publish_output_frame(
             output_frame_request(2, 2, 7, None),

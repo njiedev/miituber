@@ -27,12 +27,16 @@ The app already has the right producer side:
   virtual camera API floor is met before attempting device/source work.
 - Raw-frame readiness is reported only when both the device is installed and the
   native sink says it is ready.
-- Start Output configures `NativeCameraSinkState` with the current width,
-  height, and fps; Stop Output clears that format and frame counters.
+- Start Output calls `start_native_camera_sink` with the current width, height,
+  and fps; Stop Output calls `stop_native_camera_sink` to clear the format,
+  readiness, and frame counters.
 - `publish_virtual_camera_frame` already calls the native sink handoff hook;
   today it is a no-op until `rawFrameSinkReady` is true.
 - Rust tests cover both the dormant no-op path and the ready-sink path that
   requires raw RGBA frames.
+- Until the Media Foundation sink exists, the lifecycle hook keeps
+  `rawFrameSinkReady` false even if device probing finds a matching friendly
+  name.
 - Rust currently exposes those frames through JPEG/MJPEG/PNG HTTP endpoints for
   OBS Browser Source.
 
@@ -84,8 +88,8 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
 - Show `MiiTuber Camera not installed yet` in the output diagnostics.
 - Show a separate "could not check" state if Windows camera probing fails.
 - Use the OBS path to finish the Phase 4 live proof.
-- Then replace the placeholder status with actual Windows device detection and
-  start/stop hooks.
+- Then replace the dormant lifecycle hook with actual Windows camera
+  registration/start/stop work.
 
 ## Acceptance Proof
 
