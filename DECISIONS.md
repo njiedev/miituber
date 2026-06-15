@@ -42,3 +42,4 @@
 - Chose native Windows "MiiTuber Camera" as the next output track after OBS-first verification because Mohammed wants the app to appear as its own webcam like VTube Studio.
 - Chose a read-only native camera status boundary before driver work because the app should clearly distinguish the working OBS stream from the future Windows device.
 - Chose a Rust `OutputFrameStore` boundary because OBS HTTP routes and the future native Windows camera should consume the same published frames without depending on each other.
+- Chose to publish optional raw RGBA frames to Rust because native camera sinks need camera-friendly pixel buffers and should not depend on MJPEG decoding.

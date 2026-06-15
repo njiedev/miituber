@@ -50,10 +50,16 @@ struct VirtualCameraState {
 struct OutputFrameStore {
     latest_jpeg: Mutex<Option<Vec<u8>>>,
     latest_png: Mutex<Option<Vec<u8>>>,
+    latest_rgba: Mutex<Option<Vec<u8>>>,
 }
 
 impl OutputFrameStore {
-    fn publish(&self, jpeg_bytes: Vec<u8>, png_bytes: Option<Vec<u8>>) -> Result<(), String> {
+    fn publish(
+        &self,
+        jpeg_bytes: Vec<u8>,
+        png_bytes: Option<Vec<u8>>,
+        rgba_bytes: Option<Vec<u8>>,
+    ) -> Result<(), String> {
         *self
             .latest_jpeg
             .lock()
@@ -62,6 +68,10 @@ impl OutputFrameStore {
             .latest_png
             .lock()
             .map_err(|_| "Latest transparent output frame lock failed".to_string())? = png_bytes;
+        *self
+            .latest_rgba
+            .lock()
+            .map_err(|_| "Latest raw output frame lock failed".to_string())? = rgba_bytes;
 
         Ok(())
     }
@@ -75,6 +85,10 @@ impl OutputFrameStore {
             .latest_png
             .lock()
             .map_err(|_| "Latest transparent output frame lock failed".to_string())? = None;
+        *self
+            .latest_rgba
+            .lock()
+            .map_err(|_| "Latest raw output frame lock failed".to_string())? = None;
 
         Ok(())
     }
@@ -86,6 +100,11 @@ impl OutputFrameStore {
     fn latest_png(&self) -> Option<Vec<u8>> {
         self.latest_png.lock().ok().and_then(|frame| frame.clone())
     }
+
+    #[cfg(test)]
+    fn latest_rgba(&self) -> Option<Vec<u8>> {
+        self.latest_rgba.lock().ok().and_then(|frame| frame.clone())
+    }
 }
 
 #[derive(Default)]
@@ -96,6 +115,7 @@ struct VirtualCameraSession {
     fps: u32,
     frame_count: u64,
     last_frame_bytes: usize,
+    last_rgba_frame_bytes: usize,
     frame_url: String,
     png_frame_url: String,
     mjpeg_url: String,
@@ -119,6 +139,7 @@ struct PublishVirtualCameraFrameRequest {
     frame_index: u64,
     jpeg_bytes: Vec<u8>,
     png_bytes: Option<Vec<u8>>,
+    rgba_bytes: Option<Vec<u8>>,
 }
 
 #[derive(serde::Serialize)]
@@ -133,6 +154,7 @@ struct VirtualCameraStatus {
     fps: u32,
     frame_count: u64,
     last_frame_bytes: usize,
+    last_rgba_frame_bytes: usize,
     frame_url: String,
     png_frame_url: String,
     mjpeg_url: String,
@@ -364,6 +386,7 @@ async fn start_virtual_camera(
     session.fps = request.fps;
     session.frame_count = 0;
     session.last_frame_bytes = 0;
+    session.last_rgba_frame_bytes = 0;
     session.frame_url = OUTPUT_FRAME_URL.to_string();
     session.png_frame_url = OUTPUT_PNG_FRAME_URL.to_string();
     session.mjpeg_url = OUTPUT_MJPEG_URL.to_string();
@@ -384,6 +407,7 @@ async fn stop_virtual_camera(
     session.running = false;
     session.frame_count = 0;
     session.last_frame_bytes = 0;
+    session.last_rgba_frame_bytes = 0;
     clear_latest_output_frame(&state)?;
 
     Ok(virtual_camera_status_from_session(&session))
@@ -444,12 +468,16 @@ async fn publish_virtual_camera_frame(
         ));
     }
 
+    validate_rgba_frame(request.rgba_bytes.as_deref(), request.width, request.height)?;
+
     let frame_bytes = request.jpeg_bytes.len();
+    let rgba_frame_bytes = request.rgba_bytes.as_ref().map_or(0, Vec::len);
     state
         .frames
-        .publish(request.jpeg_bytes, request.png_bytes)?;
+        .publish(request.jpeg_bytes, request.png_bytes, request.rgba_bytes)?;
     session.frame_count = request.frame_index;
     session.last_frame_bytes = frame_bytes;
+    session.last_rgba_frame_bytes = rgba_frame_bytes;
 
     Ok(virtual_camera_status_from_session(&session))
 }
@@ -472,6 +500,7 @@ fn virtual_camera_status_from_session(session: &VirtualCameraSession) -> Virtual
         fps: session.fps,
         frame_count: session.frame_count,
         last_frame_bytes: session.last_frame_bytes,
+        last_rgba_frame_bytes: session.last_rgba_frame_bytes,
         frame_url: session.frame_url.clone(),
         png_frame_url: session.png_frame_url.clone(),
         mjpeg_url: session.mjpeg_url.clone(),
@@ -697,6 +726,11 @@ fn latest_png(state: &SharedVirtualCameraState) -> Option<Vec<u8>> {
     state.frames.latest_png()
 }
 
+#[cfg(test)]
+fn latest_rgba(state: &SharedVirtualCameraState) -> Option<Vec<u8>> {
+    state.frames.latest_rgba()
+}
+
 fn latest_jpeg(state: &SharedVirtualCameraState) -> Option<Vec<u8>> {
     state.frames.latest_jpeg()
 }
@@ -711,6 +745,31 @@ fn is_jpeg_frame(bytes: &[u8]) -> bool {
 
 fn is_png_frame(bytes: &[u8]) -> bool {
     bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+}
+
+fn validate_rgba_frame(bytes: Option<&[u8]>, width: u32, height: u32) -> Result<(), String> {
+    let Some(bytes) = bytes else {
+        return Ok(());
+    };
+
+    let expected_len = expected_rgba_frame_len(width, height)?;
+    if bytes.len() != expected_len {
+        return Err(format!(
+            "Raw RGBA output frame was {} bytes, expected {expected_len} for {width}x{height}",
+            bytes.len()
+        ));
+    }
+
+    Ok(())
+}
+
+fn expected_rgba_frame_len(width: u32, height: u32) -> Result<usize, String> {
+    let pixels = u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|value| value.checked_mul(4))
+        .ok_or_else(|| "Raw RGBA output frame dimensions overflowed".to_string())?;
+
+    usize::try_from(pixels).map_err(|_| "Raw RGBA output frame is too large".to_string())
 }
 
 fn write_text_response(stream: &mut TcpStream, status: u16, content_type: &str, body: &[u8]) {
@@ -973,12 +1032,12 @@ fn hex_encode(bytes: &[u8]) -> String {
 mod tests {
     use super::{
         calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
-        is_jpeg_frame, is_png_frame, latest_jpeg, latest_png, normalize_mii_data_for_renderer,
-        output_server_home_response_is_ours, output_session_is_running,
-        virtual_camera_status_from_session, SharedVirtualCameraState, VirtualCameraSession,
-        FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS, OUTPUT_FRAME_URL, OUTPUT_MJPEG_URL,
-        OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER, OUTPUT_TRANSPARENT_SOURCE_URL,
-        STUDIO_ENCODED_LEN, STUDIO_RAW_LEN, SWITCH_CHAR_INFO_LEN,
+        is_jpeg_frame, is_png_frame, latest_jpeg, latest_png, latest_rgba,
+        normalize_mii_data_for_renderer, output_server_home_response_is_ours,
+        output_session_is_running, validate_rgba_frame, virtual_camera_status_from_session,
+        SharedVirtualCameraState, VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS,
+        OUTPUT_FRAME_URL, OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
+        OUTPUT_TRANSPARENT_SOURCE_URL, STUDIO_ENCODED_LEN, STUDIO_RAW_LEN, SWITCH_CHAR_INFO_LEN,
     };
 
     #[test]
@@ -1066,7 +1125,7 @@ mod tests {
         let state = SharedVirtualCameraState::default();
         state
             .frames
-            .publish(vec![0xff, 0xd8, 0xff, 0xe0], None)
+            .publish(vec![0xff, 0xd8, 0xff, 0xe0], None, None)
             .unwrap();
 
         assert_eq!(latest_jpeg(&state), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
@@ -1080,6 +1139,7 @@ mod tests {
             .publish(
                 vec![0xff, 0xd8, 0xff, 0xe0],
                 Some(b"\x89PNG\r\n\x1a\n".to_vec()),
+                Some(vec![0, 1, 2, 3]),
             )
             .unwrap();
 
@@ -1087,10 +1147,11 @@ mod tests {
 
         assert_eq!(latest_jpeg(&state), None);
         assert_eq!(latest_png(&state), None);
+        assert_eq!(latest_rgba(&state), None);
     }
 
     #[test]
-    fn output_frame_store_tracks_jpeg_and_transparent_frame_together() {
+    fn output_frame_store_tracks_jpeg_transparent_and_raw_frames_together() {
         let state = SharedVirtualCameraState::default();
 
         state
@@ -1098,11 +1159,27 @@ mod tests {
             .publish(
                 vec![0xff, 0xd8, 0xff, 0xe0],
                 Some(b"\x89PNG\r\n\x1a\nabc".to_vec()),
+                Some(vec![0, 1, 2, 3, 4, 5, 6, 7]),
             )
             .unwrap();
 
         assert_eq!(latest_jpeg(&state), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
         assert_eq!(latest_png(&state), Some(b"\x89PNG\r\n\x1a\nabc".to_vec()));
+        assert_eq!(latest_rgba(&state), Some(vec![0, 1, 2, 3, 4, 5, 6, 7]));
+    }
+
+    #[test]
+    fn accepts_rgba_frame_with_expected_size() {
+        assert!(validate_rgba_frame(Some(&[0; 16]), 2, 2).is_ok());
+        assert!(validate_rgba_frame(None, 2, 2).is_ok());
+    }
+
+    #[test]
+    fn rejects_rgba_frame_with_unexpected_size() {
+        let error = validate_rgba_frame(Some(&[0; 15]), 2, 2).unwrap_err();
+
+        assert!(error.contains("Raw RGBA output frame"));
+        assert!(error.contains("expected 16"));
     }
 
     #[test]
@@ -1144,6 +1221,7 @@ mod tests {
             fps: 30,
             frame_count: 12,
             last_frame_bytes: 4096,
+            last_rgba_frame_bytes: 1280 * 720 * 4,
             frame_url: OUTPUT_FRAME_URL.to_string(),
             png_frame_url: OUTPUT_PNG_FRAME_URL.to_string(),
             mjpeg_url: OUTPUT_MJPEG_URL.to_string(),
@@ -1154,6 +1232,7 @@ mod tests {
 
         assert!(status.supported);
         assert!(status.message.contains(OUTPUT_MJPEG_URL));
+        assert_eq!(status.last_rgba_frame_bytes, 1280 * 720 * 4);
         assert_eq!(status.frame_url, OUTPUT_FRAME_URL);
         assert_eq!(status.png_frame_url, OUTPUT_PNG_FRAME_URL);
         assert_eq!(status.mjpeg_url, OUTPUT_MJPEG_URL);

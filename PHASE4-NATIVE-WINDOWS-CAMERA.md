@@ -13,7 +13,8 @@ The app already has the right producer side:
 - Webview renders fixed-resolution frames at 30 or 60 fps.
 - Rust owns output session state.
 - Rust receives each published frame through `publish_virtual_camera_frame`.
-- Rust stores the latest opaque and transparent frames in `OutputFrameStore`.
+- Rust stores the latest opaque, transparent, and raw RGBA frames in
+  `OutputFrameStore`.
 - Rust currently exposes those frames through JPEG/MJPEG/PNG HTTP endpoints for
   OBS Browser Source.
 
@@ -30,6 +31,10 @@ from the HTTP route handlers.
    format required by the Windows camera sink.
 4. Feed the sink on the existing fixed-FPS output cadence.
 5. Report native device availability separately from OBS availability.
+
+The webview now publishes raw RGBA bytes alongside the JPEG/PNG frames. This is
+larger than JPEG, but it gives the future Windows sink a camera-friendly buffer
+without coupling native output to MJPEG decoding.
 
 ## Windows Implementation Track
 

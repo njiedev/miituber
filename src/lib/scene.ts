@@ -201,6 +201,38 @@ export class AvatarScene {
     return this.captureFrame(width, height, "image/png");
   }
 
+  captureRgbaFrame(width: number, height: number): Uint8Array {
+    const currentSize = this.renderer.getSize(new THREE.Vector2());
+    const currentAspect = this.camera.aspect;
+    const currentBackground = this.scene.background;
+    const currentClearAlpha = this.renderer.getClearAlpha();
+
+    try {
+      this.renderer.setSize(width, height, false);
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+
+      if (this.background.transparent) {
+        this.scene.background = null;
+        this.renderer.setClearAlpha(0);
+      }
+
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+
+      const pixels = new Uint8Array(width * height * 4);
+      const context = this.renderer.getContext();
+      context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, pixels);
+      return pixels;
+    } finally {
+      this.renderer.setSize(currentSize.x, currentSize.y, false);
+      this.camera.aspect = currentAspect;
+      this.camera.updateProjectionMatrix();
+      this.scene.background = currentBackground;
+      this.renderer.setClearAlpha(currentClearAlpha);
+    }
+  }
+
   private async captureFrame(
     width: number,
     height: number,

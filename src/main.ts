@@ -205,6 +205,7 @@ type VirtualCameraStatus = {
   fps: number;
   frameCount: number;
   lastFrameBytes: number;
+  lastRgbaFrameBytes: number;
   frameUrl: string;
   pngFrameUrl: string;
   mjpegUrl: string;
@@ -1348,6 +1349,7 @@ async function publishFrame(
   const pngFrame = transparentBackgroundInput?.checked
     ? await avatarScene.capturePngFrame(metadata.width, metadata.height)
     : null;
+  const rgbaFrame = avatarScene.captureRgbaFrame(metadata.width, metadata.height);
 
   await invoke<VirtualCameraStatus>("publish_virtual_camera_frame", {
     request: {
@@ -1357,6 +1359,7 @@ async function publishFrame(
       frameIndex: metadata.frameIndex,
       jpegBytes: Array.from(frame),
       pngBytes: pngFrame ? Array.from(pngFrame) : null,
+      rgbaBytes: Array.from(rgbaFrame),
     },
   });
 
