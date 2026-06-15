@@ -37,6 +37,9 @@ The app already has the right producer side:
 - Until the Media Foundation sink exists, the lifecycle hook keeps
   `rawFrameSinkReady` false even if device probing finds a matching friendly
   name.
+- The native camera module can convert webview RGBA frames into BGRA buffers,
+  matching a common Windows RGB32-style memory layout for the future media
+  source.
 - Rust currently exposes those frames through JPEG/MJPEG/PNG HTTP endpoints for
   OBS Browser Source.
 
@@ -62,6 +65,9 @@ much larger than JPEG, so the app only captures and sends it when
 future Windows sink a camera-friendly buffer without making the OBS path pay the
 raw-frame cost. The output diagnostics show `Raw frames` so OBS testing can
 confirm the raw path is off until the native sink exists.
+The first native buffer format is BGRA because converting from webview RGBA is a
+single red/blue channel swap per pixel and maps cleanly to Windows RGB32-style
+buffers; NV12 can be added later if a target app or API path requires it.
 When the native sink becomes ready, the `MiiTuber Camera` diagnostic row should
 show the number of raw frames handed off and the last raw frame size.
 The app refreshes native sink status immediately before Start Output so raw-frame

@@ -1084,8 +1084,8 @@ fn hex_encode(bytes: &[u8]) -> String {
 mod tests {
     use super::native_camera::{
         native_camera_device_list_contains_miituber, native_camera_status_from_sink,
-        parse_windows_build_number, start_native_camera_sink, stop_native_camera_sink,
-        NativeCameraOutputConfig, NativeCameraSinkState,
+        parse_windows_build_number, rgba_to_bgra_frame, start_native_camera_sink,
+        stop_native_camera_sink, NativeCameraOutputConfig, NativeCameraSinkState,
     };
     use super::{
         calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
@@ -1528,6 +1528,20 @@ mod tests {
 
         assert_eq!(sink.published_frame_count, 0);
         assert_eq!(sink.last_frame_bytes, 0);
+    }
+
+    #[test]
+    fn converts_rgba_pixels_to_bgra_for_native_camera_buffers() {
+        let bgra = rgba_to_bgra_frame(&[0x10, 0x20, 0x30, 0xff, 0x01, 0x02, 0x03, 0x80]).unwrap();
+
+        assert_eq!(bgra, vec![0x30, 0x20, 0x10, 0xff, 0x03, 0x02, 0x01, 0x80]);
+    }
+
+    #[test]
+    fn rejects_bgra_conversion_for_partial_rgba_pixel() {
+        let error = rgba_to_bgra_frame(&[0x10, 0x20, 0x30]).unwrap_err();
+
+        assert!(error.contains("not divisible into 4-byte pixels"));
     }
 
     #[test]

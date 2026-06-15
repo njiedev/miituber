@@ -62,8 +62,9 @@ impl NativeCameraSinkState {
             ));
         }
 
+        let bgra_bytes = rgba_to_bgra_frame(rgba_bytes)?;
         self.published_frame_count = frame_index;
-        self.last_frame_bytes = rgba_bytes.len();
+        self.last_frame_bytes = bgra_bytes.len();
         Ok(())
     }
 
@@ -90,6 +91,23 @@ pub(crate) fn start_native_camera_sink(
 pub(crate) fn stop_native_camera_sink(sink: &mut NativeCameraSinkState) {
     sink.raw_frame_sink_ready = false;
     sink.clear_output();
+}
+
+pub(crate) fn rgba_to_bgra_frame(rgba_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let mut chunks = rgba_bytes.chunks_exact(4);
+    if !chunks.remainder().is_empty() {
+        return Err(format!(
+            "Raw RGBA frame had {} bytes, which is not divisible into 4-byte pixels",
+            rgba_bytes.len()
+        ));
+    }
+
+    let mut bgra_bytes = Vec::with_capacity(rgba_bytes.len());
+    for pixel in &mut chunks {
+        bgra_bytes.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+    }
+
+    Ok(bgra_bytes)
 }
 
 fn native_camera_sink_ready_for_config(
