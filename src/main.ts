@@ -218,6 +218,8 @@ type NativeCameraStatus = {
   platformSupported: boolean;
   deviceInstalled: boolean;
   rawFrameSinkReady: boolean;
+  publishedFrameCount: number;
+  lastFrameBytes: number;
   deviceName: string;
   message: string;
 };

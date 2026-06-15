@@ -44,6 +44,28 @@ type SharedRenderCache = Arc<RenderCache>;
 struct NativeCameraSinkState {
     device_installed: bool,
     raw_frame_sink_ready: bool,
+    published_frame_count: u64,
+    last_frame_bytes: usize,
+}
+
+impl NativeCameraSinkState {
+    fn publish_raw_frame(
+        &mut self,
+        frame_index: u64,
+        rgba_bytes: Option<&[u8]>,
+    ) -> Result<(), String> {
+        if !self.raw_frame_sink_ready {
+            return Ok(());
+        }
+
+        let rgba_bytes = rgba_bytes.ok_or_else(|| {
+            "Native camera sink is ready, but no raw RGBA frame was provided".to_string()
+        })?;
+
+        self.published_frame_count = frame_index;
+        self.last_frame_bytes = rgba_bytes.len();
+        Ok(())
+    }
 }
 
 type SharedNativeCameraSinkState = Arc<Mutex<NativeCameraSinkState>>;
@@ -175,6 +197,8 @@ struct NativeCameraStatus {
     platform_supported: bool,
     device_installed: bool,
     raw_frame_sink_ready: bool,
+    published_frame_count: u64,
+    last_frame_bytes: usize,
     device_name: String,
     message: String,
 }
@@ -443,6 +467,8 @@ async fn get_native_camera_status(
         .map(|state| NativeCameraSinkState {
             device_installed: state.device_installed,
             raw_frame_sink_ready: state.raw_frame_sink_ready,
+            published_frame_count: state.published_frame_count,
+            last_frame_bytes: state.last_frame_bytes,
         })
         .map_err(|_| "Native camera sink state lock failed".to_string())?;
 
@@ -453,6 +479,7 @@ async fn get_native_camera_status(
 async fn publish_virtual_camera_frame(
     request: PublishVirtualCameraFrameRequest,
     state: tauri::State<'_, SharedVirtualCameraState>,
+    native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
 ) -> Result<VirtualCameraStatus, String> {
     if !is_jpeg_frame(&request.jpeg_bytes) {
         return Err("Output frame was not a JPEG image".to_string());
@@ -491,6 +518,10 @@ async fn publish_virtual_camera_frame(
 
     let frame_bytes = request.jpeg_bytes.len();
     let rgba_frame_bytes = request.rgba_bytes.as_ref().map_or(0, Vec::len);
+    native_sink
+        .lock()
+        .map_err(|_| "Native camera sink state lock failed".to_string())?
+        .publish_raw_frame(request.frame_index, request.rgba_bytes.as_deref())?;
     state
         .frames
         .publish(request.jpeg_bytes, request.png_bytes, request.rgba_bytes)?;
@@ -536,6 +567,8 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
             platform_supported: true,
             device_installed: sink.device_installed,
             raw_frame_sink_ready: sink.raw_frame_sink_ready,
+            published_frame_count: sink.published_frame_count,
+            last_frame_bytes: sink.last_frame_bytes,
             device_name,
             message: native_camera_status_message(sink),
         }
@@ -547,6 +580,8 @@ fn native_camera_status_from_sink(sink: &NativeCameraSinkState) -> NativeCameraS
             platform_supported: false,
             device_installed: false,
             raw_frame_sink_ready: false,
+            published_frame_count: 0,
+            last_frame_bytes: 0,
             device_name,
             message:
                 "Native MiiTuber Camera is planned for Windows first; use the OBS output stream on this platform."
@@ -1287,6 +1322,8 @@ mod tests {
         let status = native_camera_status_from_sink(&NativeCameraSinkState {
             device_installed: true,
             raw_frame_sink_ready: true,
+            published_frame_count: 7,
+            last_frame_bytes: 16,
         });
 
         assert_eq!(status.device_name, "MiiTuber Camera");
@@ -1304,6 +1341,32 @@ mod tests {
             assert!(!status.device_installed);
             assert!(!status.raw_frame_sink_ready);
         }
+    }
+
+    #[test]
+    fn native_camera_sink_ignores_raw_frames_until_ready() {
+        let mut sink = NativeCameraSinkState::default();
+
+        sink.publish_raw_frame(7, None).unwrap();
+
+        assert_eq!(sink.published_frame_count, 0);
+        assert_eq!(sink.last_frame_bytes, 0);
+    }
+
+    #[test]
+    fn native_camera_sink_counts_raw_frames_when_ready() {
+        let mut sink = NativeCameraSinkState {
+            device_installed: true,
+            raw_frame_sink_ready: true,
+            published_frame_count: 0,
+            last_frame_bytes: 0,
+        };
+
+        sink.publish_raw_frame(7, Some(&[0; 16])).unwrap();
+
+        assert_eq!(sink.published_frame_count, 7);
+        assert_eq!(sink.last_frame_bytes, 16);
+        assert!(sink.publish_raw_frame(8, None).is_err());
     }
 
     #[test]
