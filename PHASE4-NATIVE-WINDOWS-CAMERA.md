@@ -41,7 +41,8 @@ The app already has the right producer side:
   matching a common Windows RGB32-style memory layout for the future media
   source.
 - When raw-frame delivery is enabled, the native sink stores the latest BGRA
-  frame snapshot for the future Media Foundation source to read.
+  frame snapshot, including frame index, resolution, fps, stride, and bytes, for
+  the future Media Foundation source to read.
 - Rust currently exposes those frames through JPEG/MJPEG/PNG HTTP endpoints for
   OBS Browser Source.
 
@@ -72,7 +73,8 @@ single red/blue channel swap per pixel and maps cleanly to Windows RGB32-style
 buffers; NV12 can be added later if a target app or API path requires it.
 The native sink keeps the latest converted BGRA frame as a snapshot so the
 future source implementation can read the newest complete frame without knowing
-about the webview's RGBA format.
+about the webview's RGBA format. The snapshot includes stride because Windows
+media buffers are copied row-by-row.
 When the native sink becomes ready, the `MiiTuber Camera` diagnostic row should
 show the number of raw frames handed off and the last raw frame size.
 The app refreshes native sink status immediately before Start Output so raw-frame

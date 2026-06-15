@@ -14,7 +14,7 @@ pub(crate) struct NativeCameraSinkState {
     pub(crate) fps: u32,
     pub(crate) published_frame_count: u64,
     pub(crate) last_frame_bytes: usize,
-    latest_bgra_frame: Option<Vec<u8>>,
+    latest_frame: Option<NativeCameraFrameSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +24,16 @@ pub(crate) struct NativeCameraOutputConfig {
     pub(crate) fps: u32,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeCameraFrameSnapshot {
+    pub(crate) frame_index: u64,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) fps: u32,
+    pub(crate) stride_bytes: usize,
+    pub(crate) bgra_bytes: Vec<u8>,
+}
+
 impl NativeCameraSinkState {
     fn configure_output(&mut self, width: u32, height: u32, fps: u32) {
         self.width = width;
@@ -31,7 +41,7 @@ impl NativeCameraSinkState {
         self.fps = fps;
         self.published_frame_count = 0;
         self.last_frame_bytes = 0;
-        self.latest_bgra_frame = None;
+        self.latest_frame = None;
     }
 
     fn clear_output(&mut self) {
@@ -40,7 +50,7 @@ impl NativeCameraSinkState {
         self.fps = 0;
         self.published_frame_count = 0;
         self.last_frame_bytes = 0;
-        self.latest_bgra_frame = None;
+        self.latest_frame = None;
     }
 
     pub(crate) fn publish_raw_frame(
@@ -66,15 +76,23 @@ impl NativeCameraSinkState {
         }
 
         let bgra_bytes = rgba_to_bgra_frame(rgba_bytes)?;
+        let snapshot = NativeCameraFrameSnapshot {
+            frame_index,
+            width: self.width,
+            height: self.height,
+            fps: self.fps,
+            stride_bytes: native_camera_bgra_stride_bytes(self.width)?,
+            bgra_bytes,
+        };
         self.published_frame_count = frame_index;
-        self.last_frame_bytes = bgra_bytes.len();
-        self.latest_bgra_frame = Some(bgra_bytes);
+        self.last_frame_bytes = snapshot.bgra_bytes.len();
+        self.latest_frame = Some(snapshot);
         Ok(())
     }
 
     #[allow(dead_code)]
-    pub(crate) fn latest_bgra_frame(&self) -> Option<Vec<u8>> {
-        self.latest_bgra_frame.clone()
+    pub(crate) fn latest_frame(&self) -> Option<NativeCameraFrameSnapshot> {
+        self.latest_frame.clone()
     }
 
     fn expected_raw_frame_len(&self) -> Result<usize, String> {
@@ -117,6 +135,14 @@ pub(crate) fn rgba_to_bgra_frame(rgba_bytes: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     Ok(bgra_bytes)
+}
+
+pub(crate) fn native_camera_bgra_stride_bytes(width: u32) -> Result<usize, String> {
+    let bytes = u64::from(width)
+        .checked_mul(4)
+        .ok_or_else(|| "Native camera BGRA stride overflowed".to_string())?;
+
+    usize::try_from(bytes).map_err(|_| "Native camera BGRA stride is too large".to_string())
 }
 
 fn native_camera_sink_ready_for_config(

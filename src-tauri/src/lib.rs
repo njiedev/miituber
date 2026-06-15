@@ -1074,9 +1074,10 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::native_camera::{
-        native_camera_device_list_contains_miituber, native_camera_status_from_sink,
-        parse_windows_build_number, rgba_to_bgra_frame, start_native_camera_sink,
-        stop_native_camera_sink, NativeCameraOutputConfig, NativeCameraSinkState,
+        native_camera_bgra_stride_bytes, native_camera_device_list_contains_miituber,
+        native_camera_status_from_sink, parse_windows_build_number, rgba_to_bgra_frame,
+        start_native_camera_sink, stop_native_camera_sink, NativeCameraOutputConfig,
+        NativeCameraSinkState,
     };
     use super::{
         calculate_ffsd_crc16, clear_latest_output_frame, hex_encode, http_response_bytes,
@@ -1505,7 +1506,7 @@ mod tests {
 
         assert_eq!(sink.published_frame_count, 0);
         assert_eq!(sink.last_frame_bytes, 0);
-        assert_eq!(sink.latest_bgra_frame(), None);
+        assert_eq!(sink.latest_frame(), None);
     }
 
     #[test]
@@ -1520,6 +1521,12 @@ mod tests {
         let error = rgba_to_bgra_frame(&[0x10, 0x20, 0x30]).unwrap_err();
 
         assert!(error.contains("not divisible into 4-byte pixels"));
+    }
+
+    #[test]
+    fn calculates_bgra_stride_for_native_camera_frames() {
+        assert_eq!(native_camera_bgra_stride_bytes(1).unwrap(), 4);
+        assert_eq!(native_camera_bgra_stride_bytes(1280).unwrap(), 5120);
     }
 
     #[test]
@@ -1550,7 +1557,7 @@ mod tests {
         assert!(!sink.raw_frame_sink_ready);
         assert_eq!(sink.published_frame_count, 0);
         assert_eq!(sink.last_frame_bytes, 0);
-        assert_eq!(sink.latest_bgra_frame(), None);
+        assert_eq!(sink.latest_frame(), None);
     }
 
     #[test]
@@ -1568,12 +1575,18 @@ mod tests {
 
         assert_eq!(sink.published_frame_count, 7);
         assert_eq!(sink.last_frame_bytes, 16);
+        let snapshot = sink.latest_frame().expect("expected native frame snapshot");
+        assert_eq!(snapshot.frame_index, 7);
+        assert_eq!(snapshot.width, 2);
+        assert_eq!(snapshot.height, 2);
+        assert_eq!(snapshot.fps, 30);
+        assert_eq!(snapshot.stride_bytes, 8);
         assert_eq!(
-            sink.latest_bgra_frame(),
-            Some(vec![
+            snapshot.bgra_bytes,
+            vec![
                 0x30, 0x20, 0x10, 0xff, 0x03, 0x02, 0x01, 0x80, 0xcc, 0xbb, 0xaa, 0x40, 0x22, 0x11,
                 0x00, 0x20,
-            ])
+            ]
         );
         assert!(sink.publish_raw_frame(8, None).is_err());
     }
@@ -1586,7 +1599,7 @@ mod tests {
 
         assert!(error.contains("no output format"));
         assert_eq!(sink.published_frame_count, 0);
-        assert_eq!(sink.latest_bgra_frame(), None);
+        assert_eq!(sink.latest_frame(), None);
     }
 
     #[test]
@@ -1597,7 +1610,7 @@ mod tests {
 
         assert!(error.contains("expected 16"));
         assert_eq!(sink.published_frame_count, 0);
-        assert_eq!(sink.latest_bgra_frame(), None);
+        assert_eq!(sink.latest_frame(), None);
     }
 
     #[test]
