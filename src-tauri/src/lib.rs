@@ -531,10 +531,11 @@ async fn get_virtual_camera_status(
 async fn get_native_camera_status(
     native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
 ) -> Result<NativeCameraStatus, String> {
+    let device_installed = native_camera_device_installed();
     let native_sink = native_sink
         .lock()
         .map(|mut state| {
-            state.device_installed = native_camera_device_installed();
+            state.device_installed = device_installed;
             if !state.device_installed {
                 state.raw_frame_sink_ready = false;
             }
