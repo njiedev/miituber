@@ -24,13 +24,17 @@ Current state:
 - The source object carries the first default video format contract:
   stream id `1`, 1280x720, 30 fps, RGB32/BGRA-sized frames, 5120-byte stride,
   3,686,400 bytes per frame, and 333,333 100ns units per sample.
+- The crate now has a first `IMFMediaStream` skeleton that supports `IUnknown`,
+  `IMFMediaEventGenerator`, and `IMFMediaStream`, and carries the same video
+  format contract. Its descriptor and sample request methods still return
+  `E_NOTIMPL`.
 - Registration exports still return `E_NOTIMPL` so the DLL is not registered as
   a usable camera source before it can serve frames.
 
 Next implementation steps:
 
-1. Implement a presentation descriptor and media stream that advertise BGRA /
-   RGB32 frames at the active MiiTuber output resolution and FPS.
+1. Implement presentation and stream descriptors that advertise BGRA / RGB32
+   frames at the active MiiTuber output resolution and FPS.
 2. Add a shared-memory or named-pipe handoff from the Tauri app to this DLL so
    the source can read the latest BGRA snapshot when Frame Server requests a
    sample.

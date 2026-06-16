@@ -68,3 +68,4 @@
 - Chose to implement the source DLL class factory before `IMFMediaSource` because Windows activation needs the COM factory boundary before frame streaming can be debugged.
 - Chose to return an `IMFMediaSource` skeleton before descriptors and streams because COM activation can be verified separately from the Media Foundation presentation model.
 - Chose a 1280x720 30fps RGB32 default source format because it matches the current Phase 4 output default and the Tauri sink's BGRA frame snapshots.
+- Chose to add an `IMFMediaStream` skeleton before descriptors because sample delivery belongs to the stream layer, separate from source activation.

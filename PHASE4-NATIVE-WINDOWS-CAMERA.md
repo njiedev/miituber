@@ -67,6 +67,10 @@ The app already has the right producer side:
   1280x720, 30 fps, Media Foundation RGB32 subtype, 5120-byte stride, 3,686,400
   bytes per frame, and 333,333 100ns units per sample. This mirrors the BGRA
   snapshots already produced by the Tauri native sink.
+- The source DLL now has a first `IMFMediaStream` skeleton that supports
+  `IUnknown`, `IMFMediaEventGenerator`, and `IMFMediaStream`, and carries the
+  same video format contract. It still returns `E_NOTIMPL` for descriptor and
+  sample requests until the Media Foundation descriptor/sample pipeline exists.
 - When raw-frame delivery is enabled, the native sink stores the latest BGRA
   frame snapshot, including frame index, resolution, fps, stride, Media
   Foundation 100ns sample timing, and bytes, for the future source to read.
@@ -138,8 +142,8 @@ Rust is not enough for apps to see `MiiTuber Camera` as a webcam.
 - Then replace the dormant lifecycle hook with actual Windows camera
   registration/start/stop work. The first guarded registration wrapper exists;
   the source DLL boundary and class factory now exist; the next step is
-  implementing the presentation descriptor and `IMFMediaStream` so the DLL can
-  serve BGRA samples when Windows activates the CLSID.
+  implementing presentation/stream descriptors so the DLL can advertise the
+  stream, then serving BGRA samples when Windows requests them.
 
 ## Acceptance Proof
 

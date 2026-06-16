@@ -59,6 +59,13 @@ const IID_IMF_MEDIA_SOURCE: Guid = Guid {
     data4: [0x9c, 0x6b, 0xa6, 0xb4, 0x92, 0xc7, 0x8a, 0x66],
 };
 
+const IID_IMF_MEDIA_STREAM: Guid = Guid {
+    data1: 0xd182_108f,
+    data2: 0x4ec6,
+    data3: 0x443f,
+    data4: [0xaa, 0x42, 0xa7, 0x11, 0x06, 0xec, 0x82, 0x5f],
+};
+
 const CLSID_MIITUBER_CAMERA_SOURCE: Guid = Guid {
     data1: 0x8f9f_43f5,
     data2: 0x5b8c,
@@ -149,6 +156,13 @@ struct MediaSource {
 }
 
 #[repr(C)]
+struct MediaStream {
+    vtable: &'static MediaStreamVTable,
+    refs: AtomicU32,
+    format: SourceVideoFormat,
+}
+
+#[repr(C)]
 struct MediaSourceVTable {
     query_interface: unsafe extern "system" fn(
         this: *mut MediaSource,
@@ -194,6 +208,44 @@ struct MediaSourceVTable {
     shutdown: unsafe extern "system" fn(this: *mut MediaSource) -> i32,
 }
 
+#[repr(C)]
+struct MediaStreamVTable {
+    query_interface: unsafe extern "system" fn(
+        this: *mut MediaStream,
+        interface_id: *const Guid,
+        object: *mut *mut c_void,
+    ) -> i32,
+    add_ref: unsafe extern "system" fn(this: *mut MediaStream) -> u32,
+    release: unsafe extern "system" fn(this: *mut MediaStream) -> u32,
+    get_event: unsafe extern "system" fn(
+        this: *mut MediaStream,
+        flags: u32,
+        event: *mut *mut c_void,
+    ) -> i32,
+    begin_get_event: unsafe extern "system" fn(
+        this: *mut MediaStream,
+        callback: *mut c_void,
+        state: *mut c_void,
+    ) -> i32,
+    end_get_event: unsafe extern "system" fn(
+        this: *mut MediaStream,
+        result: *mut c_void,
+        event: *mut *mut c_void,
+    ) -> i32,
+    queue_event: unsafe extern "system" fn(
+        this: *mut MediaStream,
+        event_type: u32,
+        extended_type: *const Guid,
+        status: i32,
+        value: *const c_void,
+    ) -> i32,
+    get_media_source:
+        unsafe extern "system" fn(this: *mut MediaStream, media_source: *mut *mut c_void) -> i32,
+    get_stream_descriptor:
+        unsafe extern "system" fn(this: *mut MediaStream, descriptor: *mut *mut c_void) -> i32,
+    request_sample: unsafe extern "system" fn(this: *mut MediaStream, token: *mut c_void) -> i32,
+}
+
 static ACTIVE_COM_OBJECTS: AtomicU32 = AtomicU32::new(0);
 static SERVER_LOCKS: AtomicU32 = AtomicU32::new(0);
 
@@ -219,6 +271,19 @@ static MEDIA_SOURCE_VTABLE: MediaSourceVTable = MediaSourceVTable {
     stop: media_source_stop,
     pause: media_source_pause,
     shutdown: media_source_shutdown,
+};
+
+static MEDIA_STREAM_VTABLE: MediaStreamVTable = MediaStreamVTable {
+    query_interface: media_stream_query_interface,
+    add_ref: media_stream_add_ref,
+    release: media_stream_release,
+    get_event: media_stream_get_event,
+    begin_get_event: media_stream_begin_get_event,
+    end_get_event: media_stream_end_get_event,
+    queue_event: media_stream_queue_event,
+    get_media_source: media_stream_get_media_source,
+    get_stream_descriptor: media_stream_get_stream_descriptor,
+    request_sample: media_stream_request_sample,
 };
 
 #[no_mangle]
@@ -496,14 +561,147 @@ fn is_media_source_interface(interface_id: Guid) -> bool {
         || interface_id == IID_IMF_MEDIA_SOURCE
 }
 
+unsafe extern "system" fn media_stream_query_interface(
+    this: *mut MediaStream,
+    interface_id: *const Guid,
+    object: *mut *mut c_void,
+) -> i32 {
+    if this.is_null() || interface_id.is_null() || object.is_null() {
+        return E_POINTER;
+    }
+    *object = ptr::null_mut();
+
+    if !is_media_stream_interface(*interface_id) {
+        return E_NOINTERFACE;
+    }
+
+    media_stream_add_ref(this);
+    *object = this.cast::<c_void>();
+    S_OK
+}
+
+unsafe extern "system" fn media_stream_add_ref(this: *mut MediaStream) -> u32 {
+    if this.is_null() {
+        return 0;
+    }
+
+    (*this).refs.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+unsafe extern "system" fn media_stream_release(this: *mut MediaStream) -> u32 {
+    if this.is_null() {
+        return 0;
+    }
+
+    let refs = (*this).refs.fetch_sub(1, Ordering::SeqCst) - 1;
+    if refs == 0 {
+        ACTIVE_COM_OBJECTS.fetch_sub(1, Ordering::SeqCst);
+        drop(Box::from_raw(this));
+    }
+
+    refs
+}
+
+unsafe extern "system" fn media_stream_get_event(
+    _this: *mut MediaStream,
+    _flags: u32,
+    event: *mut *mut c_void,
+) -> i32 {
+    if event.is_null() {
+        return E_POINTER;
+    }
+
+    *event = ptr::null_mut();
+    E_NOTIMPL
+}
+
+unsafe extern "system" fn media_stream_begin_get_event(
+    _this: *mut MediaStream,
+    _callback: *mut c_void,
+    _state: *mut c_void,
+) -> i32 {
+    E_NOTIMPL
+}
+
+unsafe extern "system" fn media_stream_end_get_event(
+    _this: *mut MediaStream,
+    _result: *mut c_void,
+    event: *mut *mut c_void,
+) -> i32 {
+    if event.is_null() {
+        return E_POINTER;
+    }
+
+    *event = ptr::null_mut();
+    E_NOTIMPL
+}
+
+unsafe extern "system" fn media_stream_queue_event(
+    _this: *mut MediaStream,
+    _event_type: u32,
+    _extended_type: *const Guid,
+    _status: i32,
+    _value: *const c_void,
+) -> i32 {
+    E_NOTIMPL
+}
+
+unsafe extern "system" fn media_stream_get_media_source(
+    _this: *mut MediaStream,
+    media_source: *mut *mut c_void,
+) -> i32 {
+    if media_source.is_null() {
+        return E_POINTER;
+    }
+
+    *media_source = ptr::null_mut();
+    E_NOTIMPL
+}
+
+unsafe extern "system" fn media_stream_get_stream_descriptor(
+    _this: *mut MediaStream,
+    descriptor: *mut *mut c_void,
+) -> i32 {
+    if descriptor.is_null() {
+        return E_POINTER;
+    }
+
+    *descriptor = ptr::null_mut();
+    E_NOTIMPL
+}
+
+unsafe extern "system" fn media_stream_request_sample(
+    _this: *mut MediaStream,
+    _token: *mut c_void,
+) -> i32 {
+    E_NOTIMPL
+}
+
+fn create_media_stream(format: SourceVideoFormat) -> *mut MediaStream {
+    let stream = Box::new(MediaStream {
+        vtable: &MEDIA_STREAM_VTABLE,
+        refs: AtomicU32::new(1),
+        format,
+    });
+    ACTIVE_COM_OBJECTS.fetch_add(1, Ordering::SeqCst);
+    Box::into_raw(stream)
+}
+
+fn is_media_stream_interface(interface_id: Guid) -> bool {
+    interface_id == IID_IUNKNOWN
+        || interface_id == IID_IMF_MEDIA_EVENT_GENERATOR
+        || interface_id == IID_IMF_MEDIA_STREAM
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ClassFactory, DllCanUnloadNow, DllGetClassObject, DllRegisterServer, DllUnregisterServer,
-        Guid, MediaSource, SourceVideoFormat, CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION,
-        CLSID_MIITUBER_CAMERA_SOURCE, E_NOINTERFACE, E_NOTIMPL, E_POINTER, IID_ICLASS_FACTORY,
-        IID_IMF_MEDIA_EVENT_GENERATOR, IID_IMF_MEDIA_SOURCE, IID_IUNKNOWN, MFVIDEOFORMAT_RGB32,
-        MIITUBER_CAMERA_SOURCE_CLSID, S_FALSE, S_OK,
+        create_media_stream, ClassFactory, DllCanUnloadNow, DllGetClassObject, DllRegisterServer,
+        DllUnregisterServer, Guid, MediaSource, MediaStream, SourceVideoFormat,
+        CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, CLSID_MIITUBER_CAMERA_SOURCE,
+        E_NOINTERFACE, E_NOTIMPL, E_POINTER, IID_ICLASS_FACTORY, IID_IMF_MEDIA_EVENT_GENERATOR,
+        IID_IMF_MEDIA_SOURCE, IID_IUNKNOWN, MFVIDEOFORMAT_RGB32, MIITUBER_CAMERA_SOURCE_CLSID,
+        S_FALSE, S_OK,
     };
     use std::ffi::c_void;
 
@@ -743,6 +941,69 @@ mod tests {
     }
 
     #[test]
+    fn media_stream_carries_video_format_contract() {
+        let format = SourceVideoFormat::default_output();
+        let stream = create_media_stream(format);
+
+        unsafe {
+            assert_eq!((*stream).format, format);
+            release_media_stream(stream.cast::<c_void>());
+        }
+    }
+
+    #[test]
+    fn media_stream_query_interface_supports_stream_hierarchy() {
+        let stream = create_media_stream(SourceVideoFormat::default_output());
+        let mut queried: *mut c_void = std::ptr::null_mut();
+
+        let result = unsafe {
+            ((*(*stream).vtable).query_interface)(
+                stream,
+                &IID_IMF_MEDIA_EVENT_GENERATOR,
+                &mut queried,
+            )
+        };
+
+        assert_eq!(result, S_OK);
+        assert_eq!(queried, stream.cast::<c_void>());
+        unsafe {
+            assert_eq!(((*(*stream).vtable).release)(stream), 1);
+            assert_eq!(((*(*stream).vtable).release)(stream), 0);
+        }
+    }
+
+    #[test]
+    fn media_stream_methods_are_stubbed_until_descriptor_and_sample_delivery_exist() {
+        let stream = create_media_stream(SourceVideoFormat::default_output());
+        let mut source: *mut c_void = std::ptr::dangling_mut();
+        let mut descriptor: *mut c_void = std::ptr::dangling_mut();
+        let mut event: *mut c_void = std::ptr::dangling_mut();
+
+        unsafe {
+            assert_eq!(
+                ((*(*stream).vtable).get_media_source)(stream, &mut source),
+                E_NOTIMPL
+            );
+            assert!(source.is_null());
+            assert_eq!(
+                ((*(*stream).vtable).get_stream_descriptor)(stream, &mut descriptor),
+                E_NOTIMPL
+            );
+            assert!(descriptor.is_null());
+            assert_eq!(
+                ((*(*stream).vtable).get_event)(stream, 0, &mut event),
+                E_NOTIMPL
+            );
+            assert!(event.is_null());
+            assert_eq!(
+                ((*(*stream).vtable).request_sample)(stream, std::ptr::null_mut()),
+                E_NOTIMPL
+            );
+            release_media_stream(stream.cast::<c_void>());
+        }
+    }
+
+    #[test]
     fn query_interface_adds_a_reference_for_supported_interfaces() {
         let class_factory = create_factory();
         let factory = class_factory.cast::<ClassFactory>();
@@ -834,5 +1095,10 @@ mod tests {
     unsafe fn release_media_source(source: *mut c_void) {
         let media_source = source.cast::<MediaSource>();
         ((*(*media_source).vtable).release)(media_source);
+    }
+
+    unsafe fn release_media_stream(stream: *mut c_void) {
+        let media_stream = stream.cast::<MediaStream>();
+        ((*(*media_stream).vtable).release)(media_stream);
     }
 }
