@@ -1,4 +1,5 @@
 mod native_camera;
+mod spout_output;
 
 use native_camera::{
     native_camera_backend_probe, native_camera_device_probe, native_camera_platform_probe,
@@ -6,6 +7,7 @@ use native_camera::{
     stop_native_camera_sink, NativeCameraOutputConfig, NativeCameraSinkState, NativeCameraStatus,
 };
 use sha2::{Digest, Sha256};
+use spout_output::{SharedSpoutOutputState, SpoutOutputConfig, SpoutOutputStatus};
 use std::{
     collections::HashMap,
     io::{Read, Write},
@@ -493,18 +495,61 @@ async fn get_native_camera_status(
 }
 
 #[tauri::command]
+async fn start_spout_output(
+    request: StartVirtualCameraRequest,
+    spout_output: tauri::State<'_, SharedSpoutOutputState>,
+) -> Result<SpoutOutputStatus, String> {
+    validate_output_settings(request.width, request.height, request.fps)?;
+    let mut spout_output = spout_output
+        .lock()
+        .map_err(|_| "Spout output state lock failed".to_string())?;
+    spout_output.start(SpoutOutputConfig {
+        width: request.width,
+        height: request.height,
+        fps: request.fps,
+    })?;
+
+    Ok(spout_output.status())
+}
+
+#[tauri::command]
+async fn stop_spout_output(
+    spout_output: tauri::State<'_, SharedSpoutOutputState>,
+) -> Result<SpoutOutputStatus, String> {
+    let mut spout_output = spout_output
+        .lock()
+        .map_err(|_| "Spout output state lock failed".to_string())?;
+    spout_output.stop();
+
+    Ok(spout_output.status())
+}
+
+#[tauri::command]
+async fn get_spout_output_status(
+    spout_output: tauri::State<'_, SharedSpoutOutputState>,
+) -> Result<SpoutOutputStatus, String> {
+    let spout_output = spout_output
+        .lock()
+        .map_err(|_| "Spout output state lock failed".to_string())?;
+
+    Ok(spout_output.status())
+}
+
+#[tauri::command]
 async fn publish_virtual_camera_frame(
     request: PublishVirtualCameraFrameRequest,
     state: tauri::State<'_, SharedVirtualCameraState>,
     native_sink: tauri::State<'_, SharedNativeCameraSinkState>,
+    spout_output: tauri::State<'_, SharedSpoutOutputState>,
 ) -> Result<VirtualCameraStatus, String> {
-    publish_output_frame(request, &state, &native_sink)
+    publish_output_frame(request, &state, &native_sink, &spout_output)
 }
 
 fn publish_output_frame(
     request: PublishVirtualCameraFrameRequest,
     state: &SharedVirtualCameraState,
     native_sink: &SharedNativeCameraSinkState,
+    spout_output: &SharedSpoutOutputState,
 ) -> Result<VirtualCameraStatus, String> {
     if !is_jpeg_frame(&request.jpeg_bytes) {
         return Err("Output frame was not a JPEG image".to_string());
@@ -521,18 +566,23 @@ fn publish_output_frame(
         .lock()
         .map_err(|_| "Virtual camera state lock failed".to_string())?;
 
-    if !session.running {
-        return Err("Virtual camera output is not running".to_string());
+    let spout_running = spout_output
+        .lock()
+        .map_err(|_| "Spout output state lock failed".to_string())?
+        .requires_rgba_frames();
+
+    if !session.running && !spout_running {
+        return Err("No output sink is running".to_string());
     }
 
-    if request.width != session.width || request.height != session.height {
+    if session.running && (request.width != session.width || request.height != session.height) {
         return Err(format!(
             "Output frame size changed from {}x{} to {}x{}",
             session.width, session.height, request.width, request.height
         ));
     }
 
-    if request.fps != session.fps {
+    if session.running && request.fps != session.fps {
         return Err(format!(
             "Output frame rate changed from {} fps to {} fps",
             session.fps, request.fps
@@ -547,6 +597,15 @@ fn publish_output_frame(
         .lock()
         .map_err(|_| "Native camera sink state lock failed".to_string())?
         .publish_raw_frame(request.frame_index, request.rgba_bytes.as_deref())?;
+    spout_output
+        .lock()
+        .map_err(|_| "Spout output state lock failed".to_string())?
+        .publish_rgba(
+            request.frame_index,
+            request.rgba_bytes.as_deref(),
+            request.width,
+            request.height,
+        )?;
     state
         .frames
         .publish(request.jpeg_bytes, request.png_bytes, request.rgba_bytes)?;
@@ -1093,9 +1152,9 @@ mod tests {
         normalize_mii_data_for_renderer, output_server_home_response_is_ours,
         output_session_is_running, publish_output_frame, start_output_session, stop_output_session,
         validate_rgba_frame, virtual_camera_status_from_session, PublishVirtualCameraFrameRequest,
-        SharedNativeCameraSinkState, SharedVirtualCameraState, StartVirtualCameraRequest,
-        VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS, OUTPUT_FRAME_URL,
-        OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
+        SharedNativeCameraSinkState, SharedSpoutOutputState, SharedVirtualCameraState,
+        StartVirtualCameraRequest, VirtualCameraSession, FFL_STORE_DATA_LEN, LEGACY_MIIC_DATA_LENS,
+        OUTPUT_FRAME_URL, OUTPUT_MJPEG_URL, OUTPUT_PNG_FRAME_URL, OUTPUT_SERVER_HOME_MARKER,
         OUTPUT_TRANSPARENT_SOURCE_URL, STUDIO_ENCODED_LEN, STUDIO_RAW_LEN, SWITCH_CHAR_INFO_LEN,
     };
 
@@ -1737,6 +1796,7 @@ mod tests {
             output_frame_request(2, 2, 7, Some(vec![0; 16])),
             &output_state,
             &native_sink,
+            &SharedSpoutOutputState::default(),
         )
         .unwrap();
 
@@ -1763,6 +1823,7 @@ mod tests {
             output_frame_request(2, 2, 7, None),
             &output_state,
             &native_sink,
+            &SharedSpoutOutputState::default(),
         ) {
             Ok(_) => panic!("expected missing raw frame to fail"),
             Err(error) => error,
@@ -1798,16 +1859,20 @@ pub fn run() {
     tauri::Builder::default()
         .manage(SharedRenderCache::default())
         .manage(SharedNativeCameraSinkState::default())
+        .manage(SharedSpoutOutputState::default())
         .manage(virtual_camera_state)
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             check_renderer_status,
+            get_spout_output_status,
             get_native_camera_status,
             get_virtual_camera_status,
             publish_virtual_camera_frame,
             render_mii_glb,
             render_mii_png,
+            start_spout_output,
             start_virtual_camera,
+            stop_spout_output,
             stop_virtual_camera
         ])
         .run(tauri::generate_context!())

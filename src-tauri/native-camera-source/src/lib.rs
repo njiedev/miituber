@@ -124,6 +124,66 @@ impl SourceVideoFormat {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SourceMediaTypeModel {
+    subtype: Guid,
+    width: u32,
+    height: u32,
+    frame_rate_numerator: u32,
+    frame_rate_denominator: u32,
+    stride_bytes: usize,
+    frame_len: usize,
+}
+
+impl SourceMediaTypeModel {
+    fn from_format(format: SourceVideoFormat) -> Result<Self, &'static str> {
+        Ok(Self {
+            subtype: format.subtype,
+            width: format.width,
+            height: format.height,
+            frame_rate_numerator: format.fps,
+            frame_rate_denominator: 1,
+            stride_bytes: format.stride_bytes()?,
+            frame_len: format.frame_len()?,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SourceStreamDescriptorModel {
+    stream_id: u32,
+    selected: bool,
+    media_type: SourceMediaTypeModel,
+}
+
+impl SourceStreamDescriptorModel {
+    fn from_format(format: SourceVideoFormat) -> Result<Self, &'static str> {
+        Ok(Self {
+            stream_id: format.stream_id,
+            selected: true,
+            media_type: SourceMediaTypeModel::from_format(format)?,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SourcePresentationDescriptorModel {
+    stream_count: u32,
+    selected_stream_count: u32,
+    stream: SourceStreamDescriptorModel,
+}
+
+impl SourcePresentationDescriptorModel {
+    fn from_format(format: SourceVideoFormat) -> Result<Self, &'static str> {
+        let stream = SourceStreamDescriptorModel::from_format(format)?;
+        Ok(Self {
+            stream_count: 1,
+            selected_stream_count: u32::from(stream.selected),
+            stream,
+        })
+    }
+}
+
 #[repr(C)]
 struct ClassFactory {
     vtable: &'static ClassFactoryVTable,
@@ -697,11 +757,11 @@ fn is_media_stream_interface(interface_id: Guid) -> bool {
 mod tests {
     use super::{
         create_media_stream, ClassFactory, DllCanUnloadNow, DllGetClassObject, DllRegisterServer,
-        DllUnregisterServer, Guid, MediaSource, MediaStream, SourceVideoFormat,
-        CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, CLSID_MIITUBER_CAMERA_SOURCE,
-        E_NOINTERFACE, E_NOTIMPL, E_POINTER, IID_ICLASS_FACTORY, IID_IMF_MEDIA_EVENT_GENERATOR,
-        IID_IMF_MEDIA_SOURCE, IID_IUNKNOWN, MFVIDEOFORMAT_RGB32, MIITUBER_CAMERA_SOURCE_CLSID,
-        S_FALSE, S_OK,
+        DllUnregisterServer, Guid, MediaSource, MediaStream, SourcePresentationDescriptorModel,
+        SourceStreamDescriptorModel, SourceVideoFormat, CLASS_E_CLASSNOTAVAILABLE,
+        CLASS_E_NOAGGREGATION, CLSID_MIITUBER_CAMERA_SOURCE, E_NOINTERFACE, E_NOTIMPL, E_POINTER,
+        IID_ICLASS_FACTORY, IID_IMF_MEDIA_EVENT_GENERATOR, IID_IMF_MEDIA_SOURCE, IID_IUNKNOWN,
+        MFVIDEOFORMAT_RGB32, MIITUBER_CAMERA_SOURCE_CLSID, S_FALSE, S_OK,
     };
     use std::ffi::c_void;
 
@@ -735,6 +795,34 @@ mod tests {
         assert_eq!(format.stride_bytes().unwrap(), 5120);
         assert_eq!(format.frame_len().unwrap(), 3_686_400);
         assert_eq!(format.sample_duration_100ns().unwrap(), 333_333);
+    }
+
+    #[test]
+    fn stream_descriptor_model_advertises_selected_rgb32_stream() {
+        let format = SourceVideoFormat::default_output();
+        let descriptor = SourceStreamDescriptorModel::from_format(format).unwrap();
+
+        assert_eq!(descriptor.stream_id, 1);
+        assert!(descriptor.selected);
+        assert_eq!(descriptor.media_type.subtype, MFVIDEOFORMAT_RGB32);
+        assert_eq!(descriptor.media_type.width, 1280);
+        assert_eq!(descriptor.media_type.height, 720);
+        assert_eq!(descriptor.media_type.frame_rate_numerator, 30);
+        assert_eq!(descriptor.media_type.frame_rate_denominator, 1);
+        assert_eq!(descriptor.media_type.stride_bytes, 5120);
+        assert_eq!(descriptor.media_type.frame_len, 3_686_400);
+    }
+
+    #[test]
+    fn presentation_descriptor_model_exposes_one_selected_stream() {
+        let descriptor =
+            SourcePresentationDescriptorModel::from_format(SourceVideoFormat::default_output())
+                .unwrap();
+
+        assert_eq!(descriptor.stream_count, 1);
+        assert_eq!(descriptor.selected_stream_count, 1);
+        assert_eq!(descriptor.stream.stream_id, 1);
+        assert!(descriptor.stream.selected);
     }
 
     #[test]

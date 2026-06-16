@@ -116,6 +116,12 @@ const toggleCleanOutputButton = document.querySelector<HTMLButtonElement>(
 );
 const stopOutputButton =
   document.querySelector<HTMLButtonElement>("#stop-output-button");
+const startSpoutOutputButton = document.querySelector<HTMLButtonElement>(
+  "#start-spout-output-button",
+);
+const stopSpoutOutputButton = document.querySelector<HTMLButtonElement>(
+  "#stop-spout-output-button",
+);
 const outputStatusEl = document.querySelector<HTMLElement>("#output-status");
 const debugOutputTargetEl =
   document.querySelector<HTMLElement>("#debug-output-target");
@@ -138,6 +144,9 @@ const copyTransparentOutputUrlButton = document.querySelector<HTMLButtonElement>
 const debugOutputObsEl = document.querySelector<HTMLElement>("#debug-output-obs");
 const debugNativeCameraEl = document.querySelector<HTMLElement>(
   "#debug-native-camera",
+);
+const debugSpoutOutputEl = document.querySelector<HTMLElement>(
+  "#debug-spout-output",
 );
 const debugOutputProbeEl =
   document.querySelector<HTMLElement>("#debug-output-probe");
@@ -168,6 +177,7 @@ let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
 let outputFrameLoop: OutputFrameLoop | null = null;
 let currentOutputStatus: VirtualCameraStatus | null = null;
 let currentNativeCameraStatus: NativeCameraStatus | null = null;
+let currentSpoutOutputStatus: SpoutOutputStatus | null = null;
 let currentOutputUrl: string | null = null;
 let currentTransparentOutputUrl: string | null = null;
 let outputFrameProbePending = false;
@@ -231,6 +241,18 @@ type NativeCameraStatus = {
   publishedFrameCount: number;
   lastFrameBytes: number;
   deviceName: string;
+  message: string;
+};
+
+type SpoutOutputStatus = {
+  supported: boolean;
+  running: boolean;
+  senderName: string;
+  width: number;
+  height: number;
+  fps: number;
+  frameCount: number;
+  lastFrameBytes: number;
   message: string;
 };
 
@@ -333,6 +355,24 @@ async function refreshNativeCameraStatus() {
   }
 }
 
+async function refreshSpoutOutputStatus() {
+  try {
+    const status = await invoke<SpoutOutputStatus>("get_spout_output_status");
+    currentSpoutOutputStatus = status;
+    setSpoutOutputStatus(status);
+    setOutputButtons();
+    logRenderEvent("Spout2 output status checked", status);
+    return status;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    currentSpoutOutputStatus = null;
+    setSpoutOutputStatus(null, `Could not check Spout2 output: ${message}`);
+    console.error("[MiiTuber] get_spout_output_status failed", { error, message });
+    setOutputButtons();
+    return null;
+  }
+}
+
 function setRenderButtonDisabled(disabled: boolean) {
   if (renderButton) renderButton.disabled = disabled;
 }
@@ -350,16 +390,24 @@ function setTrackingButtons() {
 
 function setOutputButtons() {
   const outputRunning = outputFrameLoop?.isRunning() ?? false;
+  const mjpegRunning = currentOutputStatus?.running ?? false;
+  const spoutRunning = currentSpoutOutputStatus?.running ?? false;
+  const anySinkRunning = mjpegRunning || spoutRunning || outputRunning;
   if (toggleCleanOutputButton) {
     toggleCleanOutputButton.disabled = !avatarLoaded;
     toggleCleanOutputButton.textContent = cleanOutputMode
       ? "Close OBS Clean View"
       : "Open OBS Clean View";
   }
-  if (startOutputButton) startOutputButton.disabled = !avatarLoaded || outputRunning;
-  if (stopOutputButton) stopOutputButton.disabled = !outputRunning;
-  if (outputResolutionSelect) outputResolutionSelect.disabled = outputRunning;
-  if (outputFpsSelect) outputFpsSelect.disabled = outputRunning;
+  if (startOutputButton) startOutputButton.disabled = !avatarLoaded || mjpegRunning;
+  if (stopOutputButton) stopOutputButton.disabled = !mjpegRunning;
+  if (startSpoutOutputButton) {
+    startSpoutOutputButton.disabled =
+      !avatarLoaded || spoutRunning || currentSpoutOutputStatus?.supported === false;
+  }
+  if (stopSpoutOutputButton) stopSpoutOutputButton.disabled = !spoutRunning;
+  if (outputResolutionSelect) outputResolutionSelect.disabled = anySinkRunning;
+  if (outputFpsSelect) outputFpsSelect.disabled = anySinkRunning;
 }
 
 function setLipSyncButtons(running = lipSyncContext !== null) {
@@ -523,6 +571,29 @@ function setNativeCameraStatus(status: NativeCameraStatus | null, error?: string
     : "Windows-first native camera planned.";
 }
 
+function setSpoutOutputStatus(status: SpoutOutputStatus | null, error?: string) {
+  if (!debugSpoutOutputEl) return;
+
+  if (error) {
+    debugSpoutOutputEl.textContent = error;
+    return;
+  }
+
+  if (!status) {
+    debugSpoutOutputEl.textContent = "Not checked.";
+    return;
+  }
+
+  if (!status.supported) {
+    debugSpoutOutputEl.textContent = "Spout2 output is Windows-only.";
+    return;
+  }
+
+  debugSpoutOutputEl.textContent = status.running
+    ? `${status.senderName} running, ${status.width} x ${status.height} @ ${status.fps}, ${status.frameCount} frames, ${formatBytes(status.lastFrameBytes)} last.`
+    : `Stopped. OBS Spout2 Capture will look for sender "${status.senderName}".`;
+}
+
 function setOutputProbe(message: string) {
   if (debugOutputProbeEl) debugOutputProbeEl.textContent = message;
 }
@@ -652,6 +723,7 @@ setLipSyncButtons();
 setLipSyncDebugValue(0);
 void refreshRendererHealth();
 void refreshNativeCameraStatus();
+void refreshSpoutOutputStatus();
 void refreshCameraList();
 void refreshMicrophoneList();
 
@@ -1351,21 +1423,7 @@ startOutputButton?.addEventListener("click", async () => {
       request: settings,
     });
 
-    outputFrameLoop = new OutputFrameLoop({
-      ...settings,
-      captureFrame: (width, height) => avatarScene.captureJpegFrame(width, height),
-      publishFrame,
-      onStats: setOutputDebugValues,
-      onError: (error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("[MiiTuber] output loop failed", { error, message });
-        currentOutputStatus = null;
-        setTransparentOutputUrl(null);
-        setOutputStatus(`Output stopped: ${message}`, "error");
-        setOutputButtons();
-      },
-    });
-    outputFrameLoop.start();
+    ensureOutputFrameLoop(settings);
     currentOutputStatus = status;
     outputFrameProbePending = true;
     outputFrameProbeUrl = status.frameUrl;
@@ -1398,9 +1456,70 @@ stopOutputButton?.addEventListener("click", () => {
   void stopOutput("Output stopped.");
 });
 
-async function stopOutput(message?: string) {
+startSpoutOutputButton?.addEventListener("click", async () => {
+  if (!avatarLoaded) {
+    setOutputStatus("Render an avatar before starting Spout output.", "error");
+    return;
+  }
+
+  const settings = getOutputSettings();
+
+  try {
+    setOutputStatus("Starting Spout2 sender...");
+    const status = await invoke<SpoutOutputStatus>("start_spout_output", {
+      request: settings,
+    });
+    currentSpoutOutputStatus = status;
+    setSpoutOutputStatus(status);
+    ensureOutputFrameLoop(settings);
+    setOutputButtons();
+    setOutputStatus(status.message, "success");
+    logRenderEvent("Spout2 output started", status);
+  } catch (error) {
+    currentSpoutOutputStatus = null;
+    setOutputButtons();
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[MiiTuber] Spout2 output start failed", { error, message });
+    setSpoutOutputStatus(null, `Could not start Spout2 output: ${message}`);
+    setOutputStatus(`Could not start Spout2 output: ${message}`, "error");
+  }
+});
+
+stopSpoutOutputButton?.addEventListener("click", () => {
+  void stopSpoutOutput("Spout2 output stopped.");
+});
+
+function ensureOutputFrameLoop(settings = getOutputSettings()) {
+  if (outputFrameLoop?.isRunning()) return;
+
+  outputFrameLoop = new OutputFrameLoop({
+    ...settings,
+    captureFrame: (width, height) => avatarScene.captureJpegFrame(width, height),
+    publishFrame,
+    onStats: setOutputDebugValues,
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[MiiTuber] output loop failed", { error, message });
+      currentOutputStatus = null;
+      currentSpoutOutputStatus = null;
+      setTransparentOutputUrl(null);
+      setSpoutOutputStatus(null, `Output loop stopped: ${message}`);
+      setOutputStatus(`Output stopped: ${message}`, "error");
+      setOutputButtons();
+    },
+  });
+  outputFrameLoop.start();
+}
+
+function stopOutputFrameLoopIfIdle() {
+  if (currentOutputStatus?.running || currentSpoutOutputStatus?.running) return;
+
   outputFrameLoop?.stop();
   outputFrameLoop = null;
+  setOutputDebugValues();
+}
+
+async function stopOutput(message?: string) {
   currentOutputStatus = null;
   outputFrameProbePending = false;
   outputFrameProbeUrl = null;
@@ -1413,11 +1532,30 @@ async function stopOutput(message?: string) {
   setOutputProbe("Not checked.");
 
   try {
-    await invoke<VirtualCameraStatus>("stop_virtual_camera");
+    const status = await invoke<VirtualCameraStatus>("stop_virtual_camera");
+    currentOutputStatus = status.running ? status : null;
   } catch (error) {
     console.warn("[MiiTuber] virtual camera stop failed", { error });
   }
 
+  stopOutputFrameLoopIfIdle();
+
+  if (message) setOutputStatus(message);
+}
+
+async function stopSpoutOutput(message?: string) {
+  try {
+    const status = await invoke<SpoutOutputStatus>("stop_spout_output");
+    currentSpoutOutputStatus = status;
+    setSpoutOutputStatus(status);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn("[MiiTuber] Spout2 output stop failed", { error });
+    setSpoutOutputStatus(null, `Could not stop Spout2 output: ${errorMessage}`);
+  }
+
+  stopOutputFrameLoopIfIdle();
+  setOutputButtons();
   if (message) setOutputStatus(message);
 }
 
@@ -1429,6 +1567,7 @@ async function publishFrame(
     ? await avatarScene.capturePngFrame(metadata.width, metadata.height)
     : null;
   const rgbaFrame = currentNativeCameraStatus?.rawFrameSinkReady
+    || currentSpoutOutputStatus?.running
     ? avatarScene.captureRgbaFrame(metadata.width, metadata.height)
     : null;
 
@@ -1445,6 +1584,14 @@ async function publishFrame(
   });
   currentOutputStatus = status;
   updateRawFrameDebugValue(status);
+  if (currentSpoutOutputStatus?.running) {
+    currentSpoutOutputStatus = {
+      ...currentSpoutOutputStatus,
+      frameCount: metadata.frameIndex,
+      lastFrameBytes: rgbaFrame?.length ?? 0,
+    };
+    setSpoutOutputStatus(currentSpoutOutputStatus);
+  }
 
   if (outputFrameProbePending && outputFrameProbeUrl) {
     outputFrameProbePending = false;

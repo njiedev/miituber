@@ -69,3 +69,5 @@
 - Chose to return an `IMFMediaSource` skeleton before descriptors and streams because COM activation can be verified separately from the Media Foundation presentation model.
 - Chose a 1280x720 30fps RGB32 default source format because it matches the current Phase 4 output default and the Tauri sink's BGRA frame snapshots.
 - Chose to add an `IMFMediaStream` skeleton before descriptors because sample delivery belongs to the stream layer, separate from source activation.
+- Chose Spout2 as the active Phase 4 OBS-alpha output path because it preserves transparency and avoids the full Windows virtual camera COM/source contract while native camera work remains parked.
+- Chose a Rust-owned Spout2 lifecycle with a tiny C++ SpoutDX shim because SpoutDX can create its own DirectX 11 device and accept the existing RGBA frame buffer.

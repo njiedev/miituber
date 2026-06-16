@@ -28,8 +28,16 @@ Current state:
   `IMFMediaEventGenerator`, and `IMFMediaStream`, and carries the same video
   format contract. Its descriptor and sample request methods still return
   `E_NOTIMPL`.
+- The descriptor model now advertises one selected RGB32 stream in pure Rust
+  tests; actual Media Foundation descriptor COM objects are still parked.
 - Registration exports still return `E_NOTIMPL` so the DLL is not registered as
   a usable camera source before it can serve frames.
+
+Phase 4 pivot:
+
+- Spout2 is now the active OBS transparency path for Phase 4. This native camera
+  crate is intentionally kept compiling for the later direct-webcam workstream,
+  but it is no longer the next implementation slice.
 
 Next implementation steps:
 
