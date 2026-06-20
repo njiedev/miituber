@@ -2103,7 +2103,6 @@ dependencies = [
 name = "miituber"
 version = "0.1.0"
 dependencies = [
- "cc",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -2111,7 +2110,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
- "windows",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

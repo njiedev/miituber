@@ -13,13 +13,31 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "miituber",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "transparent": true,
+        "backgroundThrottling": "disabled"
+      },
+      {
+        "label": "clean-output",
+        "url": "/?view=clean-output",
+        "title": "MiiTuber OBS Clean View",
+        "width": 720,
+        "height": 720,
+        "minWidth": 320,
+        "minHeight": 320,
+        "resizable": true,
+        "decorations": true,
+        "transparent": true,
+        "visible": false,
+        "backgroundColor": "#00000000",
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' http://127.0.0.1:5000 http://localhost:5000 http://127.0.0.1:49321 http://localhost:49321 https://cdn.jsdelivr.net https://storage.googleapis.com; worker-src 'self' blob:"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' http://127.0.0.1:5000 http://localhost:5000 https://cdn.jsdelivr.net https://storage.googleapis.com; worker-src 'self' blob:"
     }
   },
   "bundle": {

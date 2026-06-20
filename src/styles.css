@@ -210,12 +210,6 @@ h1 {
   padding-top: 4px;
 }
 
-.output-controls__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(96px, 0.45fr);
-  gap: 10px;
-}
-
 .output-debug {
   display: grid;
   gap: 7px;
@@ -239,24 +233,6 @@ h1 {
   margin: 0;
   color: #101820;
   font-variant-numeric: tabular-nums;
-}
-
-.output-url-row {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.output-url-row span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.output-url-row button {
-  flex: 0 0 auto;
-  padding: 4px 8px;
-  border-radius: 6px;
 }
 
 .privacy-note {
@@ -604,6 +580,8 @@ h1 {
 .preview-panel {
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -648,9 +626,74 @@ h1 {
   font-weight: 700;
 }
 
+.camera-preview {
+  width: min(100%, 720px);
+  border: 1px solid #d4dee7;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.camera-preview__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #d4dee7;
+}
+
+.camera-preview__header h2 {
+  margin: 0;
+  color: #101820;
+  font-size: 0.95rem;
+}
+
+.camera-preview__header span {
+  color: #43627f;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.camera-preview__frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  background: #101820;
+  color: #d4dee7;
+  overflow: hidden;
+}
+
+.camera-preview__frame p {
+  margin: 0;
+  padding: 12px;
+  color: #d4dee7;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.camera-preview__frame video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+html.clean-output-mode,
 body.clean-output-mode {
   overflow: hidden;
   background: var(--avatar-background);
+}
+
+html.clean-output-window.transparent-output,
+body.clean-output-window.transparent-output,
+body.clean-output-window.transparent-output .preview-panel,
+body.clean-output-window.transparent-output .preview-frame,
+body.clean-output-window.transparent-output #mii-viewer {
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 body.clean-output-mode .app-shell {
@@ -664,20 +707,27 @@ body.clean-output-mode .import-panel {
 }
 
 body.clean-output-mode .preview-panel {
+  display: grid;
+  place-items: center;
   width: 100vw;
   height: 100vh;
+  background: var(--avatar-background);
 }
 
 body.clean-output-mode .preview-frame {
-  width: 100vw;
-  height: 100vh;
-  aspect-ratio: auto;
+  width: min(100vw, 100vh);
+  height: min(100vw, 100vh);
+  aspect-ratio: 1;
   border: 0;
   border-radius: 0;
   background: var(--avatar-background);
 }
 
 body.clean-output-mode .empty-preview {
+  display: none;
+}
+
+body.clean-output-mode .camera-preview {
   display: none;
 }
 

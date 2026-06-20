@@ -24,6 +24,8 @@ export type FaceTrackerStartOptions = {
 export type FaceTrackerCallbacks = {
   onFrame: (frame: FaceTrackerFrame) => void;
   onError?: (error: unknown) => void;
+  onVideoReady?: (video: HTMLVideoElement) => void;
+  onVideoStopped?: () => void;
 };
 
 export class FaceTracker {
@@ -33,12 +35,14 @@ export class FaceTracker {
   private animationFrameId: number | null = null;
   private lastFrameAt = 0;
   private lastDetectionAt = 0;
+  private onVideoStopped: (() => void) | undefined;
 
   async start(
     callbacks: FaceTrackerCallbacks,
     options: FaceTrackerStartOptions = {},
   ) {
     if (this.animationFrameId !== null) return;
+    this.onVideoStopped = callbacks.onVideoStopped;
 
     try {
       this.faceLandmarker ??= await createFaceLandmarker();
@@ -49,6 +53,7 @@ export class FaceTracker {
       this.video.playsInline = true;
       this.video.srcObject = this.stream;
       await this.video.play();
+      callbacks.onVideoReady?.(this.video);
     } catch (error) {
       this.stop();
       throw error;
@@ -98,14 +103,17 @@ export class FaceTracker {
       this.animationFrameId = null;
     }
 
-    this.stream?.getTracks().forEach((track) => track.stop());
-    this.stream = null;
-
     if (this.video) {
+      this.onVideoStopped?.();
       this.video.pause();
       this.video.srcObject = null;
-      this.video = null;
+      this.video.remove();
     }
+    this.video = null;
+    this.onVideoStopped = undefined;
+
+    this.stream?.getTracks().forEach((track) => track.stop());
+    this.stream = null;
 
     this.lastFrameAt = 0;
     this.lastDetectionAt = 0;

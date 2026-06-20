@@ -17,7 +17,8 @@
           <h1 id="app-title">Animate a Wii-style avatar</h1>
           <p class="lede">
             Import a local .ffsd, render the 3D head through the local FFL
-            server, then start webcam tracking and publish steady output frames.
+            server, then start webcam tracking and capture it in OBS through the
+            clean view window.
           </p>
         </div>
 
@@ -66,6 +67,18 @@
               <option value="">Default camera</option>
             </select>
           </label>
+          <label>
+            Tracking FPS
+            <select id="tracking-fps-select">
+              <option value="24">24</option>
+              <option value="30">30</option>
+              <option value="60" selected>60</option>
+            </select>
+          </label>
+          <label class="checkbox-control">
+            <input id="show-camera-preview" type="checkbox" checked />
+            Show camera preview
+          </label>
           <div class="action-row">
             <button id="start-tracking-button" type="button" disabled>
               Start Tracking
@@ -78,9 +91,8 @@
             Render an avatar before starting webcam tracking.
           </p>
           <p class="privacy-note">
-            Webcam frames stay local in the webview. They are used for live
-            tracking only and are not displayed, recorded, or sent to the FFL
-            renderer.
+            Webcam frames stay local in the webview. The demo preview is optional;
+            frames are not recorded or sent to the FFL renderer.
           </p>
           <details class="debug-panel">
             <summary>Debug tracking data</summary>
@@ -189,98 +201,16 @@
             </div>
           </details>
         </div>
-        <div class="output-controls" aria-label="Virtual camera output controls">
-          <div class="output-controls__grid">
-            <label>
-              Output size
-              <select id="output-resolution-select">
-                <option value="1280x720">1280 x 720</option>
-                <option value="1920x1080">1920 x 1080</option>
-                <option value="640x360">640 x 360</option>
-              </select>
-            </label>
-            <label>
-              Output FPS
-              <select id="output-fps-select">
-                <option value="30">30</option>
-                <option value="60">60</option>
-              </select>
-            </label>
-          </div>
+        <div class="output-controls" aria-label="OBS output controls">
           <div class="action-row">
             <button id="toggle-clean-output-button" type="button" disabled>
               Open OBS Clean View
             </button>
-            <button id="start-output-button" type="button" disabled>
-              Start Output
-            </button>
-            <button id="stop-output-button" type="button" disabled>
-              Stop Output
-            </button>
-            <button id="start-spout-output-button" type="button" disabled>
-              Start Spout Output
-            </button>
-            <button id="stop-spout-output-button" type="button" disabled>
-              Stop Spout Output
-            </button>
           </div>
           <p id="output-status" data-tone="idle">
-            Render an avatar before starting virtual camera output.
+            Render an avatar, then open the OBS Clean View to capture it as a
+            transparent Window Capture source in OBS.
           </p>
-          <dl class="output-debug" aria-label="Output debug values">
-            <div>
-              <dt>Target</dt>
-              <dd id="debug-output-target">1280 x 720 @ 30</dd>
-            </div>
-            <div>
-              <dt>Output FPS</dt>
-              <dd id="debug-output-fps">0</dd>
-            </div>
-            <div>
-              <dt>Frames</dt>
-              <dd id="debug-output-frames">0</dd>
-            </div>
-            <div>
-              <dt>Dropped</dt>
-              <dd id="debug-output-dropped">0</dd>
-            </div>
-            <div>
-              <dt>Raw frames</dt>
-              <dd id="debug-output-raw">Off</dd>
-            </div>
-            <div>
-              <dt>Opaque OBS URL</dt>
-              <dd class="output-url-row">
-                <span id="debug-output-url">Start output to publish stream.</span>
-                <button id="copy-output-url-button" type="button" disabled>Copy</button>
-              </dd>
-            </div>
-            <div>
-              <dt>Transparent OBS URL</dt>
-              <dd class="output-url-row">
-                <span id="debug-output-transparent-url">Enable transparent output, then start output.</span>
-                <button id="copy-transparent-output-url-button" type="button" disabled>
-                  Copy
-                </button>
-              </dd>
-            </div>
-            <div>
-              <dt>OBS detected</dt>
-              <dd id="debug-output-obs">Not checked.</dd>
-            </div>
-            <div>
-              <dt>MiiTuber Camera</dt>
-              <dd id="debug-native-camera">Not checked.</dd>
-            </div>
-            <div>
-              <dt>Spout2 sender</dt>
-              <dd id="debug-spout-output">Stopped.</dd>
-            </div>
-            <div>
-              <dt>Frame probe</dt>
-              <dd id="debug-output-probe">Not checked.</dd>
-            </div>
-          </dl>
         </div>
         <div class="lip-sync-controls" aria-label="Audio lip-sync controls">
           <label>
@@ -326,6 +256,15 @@
         <div class="preview-frame">
           <canvas id="mii-viewer" aria-label="Rendered Wii-style avatar model"></canvas>
           <p class="empty-preview">Rendered 3D model appears here.</p>
+        </div>
+        <div id="camera-preview" class="camera-preview" hidden>
+          <div class="camera-preview__header">
+            <h2>Camera</h2>
+            <span id="camera-preview-status">Waiting</span>
+          </div>
+          <div id="camera-preview-frame" class="camera-preview__frame">
+            <p>Start tracking to show the camera feed.</p>
+          </div>
         </div>
       </section>
     </main>

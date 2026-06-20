@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { emit, emitTo, listen } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   averageBlendshapeSamples,
   ExpressionPipeline,
@@ -9,11 +11,6 @@ import {
 } from "./lib/expressionPipeline";
 import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
 import { LipSyncEnvelope, rootMeanSquare } from "./lib/lipSync";
-import {
-  OutputFrameLoop,
-  type OutputFrameLoopStats,
-  type OutputFrameMetadata,
-} from "./lib/outputFrameLoop";
 import { AvatarScene } from "./lib/scene";
 import {
   FFL_EXPRESSION_LABELS,
@@ -22,6 +19,7 @@ import {
   type ExpressionChannels,
   type ExpressionScores,
   type ExpressionSignals,
+  type HeadRotation,
 } from "./lib/types";
 import {
   createDefaultTuningProfile,
@@ -32,6 +30,18 @@ import {
   type SignalName,
   type TuningProfile,
 } from "./lib/tuningProfile";
+
+const CLEAN_OUTPUT_WINDOW_LABEL = "clean-output";
+const CLEAN_OUTPUT_VIEW = "clean-output";
+const CLEAN_OUTPUT_AVATAR_STORAGE_KEY = "miituber.cleanOutputAvatar.v1";
+const CLEAN_OUTPUT_AVATAR_EVENT = "clean-output-avatar";
+const CLEAN_OUTPUT_BACKGROUND_EVENT = "clean-output-background";
+const CLEAN_OUTPUT_POSE_EVENT = "clean-output-pose";
+const CLEAN_OUTPUT_READY_EVENT = "clean-output-ready";
+const CLEAN_OUTPUT_HIDDEN_EVENT = "clean-output-hidden";
+
+const isCleanOutputWindow =
+  new URLSearchParams(window.location.search).get("view") === CLEAN_OUTPUT_VIEW;
 
 const fileInput = document.querySelector<HTMLInputElement>("#mii-file");
 const renderButton = document.querySelector<HTMLButtonElement>("#render-button");
@@ -56,6 +66,19 @@ const stopTrackingButton = document.querySelector<HTMLButtonElement>(
 );
 const trackingStatusEl = document.querySelector<HTMLElement>("#tracking-status");
 const cameraSelect = document.querySelector<HTMLSelectElement>("#camera-select");
+const trackingFpsSelect = document.querySelector<HTMLSelectElement>(
+  "#tracking-fps-select",
+);
+const showCameraPreviewInput = document.querySelector<HTMLInputElement>(
+  "#show-camera-preview",
+);
+const cameraPreviewEl = document.querySelector<HTMLElement>("#camera-preview");
+const cameraPreviewFrameEl = document.querySelector<HTMLElement>(
+  "#camera-preview-frame",
+);
+const cameraPreviewStatusEl = document.querySelector<HTMLElement>(
+  "#camera-preview-status",
+);
 const debugExpressionEl = document.querySelector<HTMLElement>("#debug-expression");
 const debugChannelsEl = document.querySelector<HTMLElement>("#debug-channels");
 const debugHeadRotationEl =
@@ -104,52 +127,10 @@ const lipSyncSpeakingLevelInput = document.querySelector<HTMLInputElement>(
 );
 const lipSyncSmoothingInput =
   document.querySelector<HTMLInputElement>("#lip-sync-smoothing");
-const outputResolutionSelect = document.querySelector<HTMLSelectElement>(
-  "#output-resolution-select",
-);
-const outputFpsSelect =
-  document.querySelector<HTMLSelectElement>("#output-fps-select");
-const startOutputButton =
-  document.querySelector<HTMLButtonElement>("#start-output-button");
 const toggleCleanOutputButton = document.querySelector<HTMLButtonElement>(
   "#toggle-clean-output-button",
 );
-const stopOutputButton =
-  document.querySelector<HTMLButtonElement>("#stop-output-button");
-const startSpoutOutputButton = document.querySelector<HTMLButtonElement>(
-  "#start-spout-output-button",
-);
-const stopSpoutOutputButton = document.querySelector<HTMLButtonElement>(
-  "#stop-spout-output-button",
-);
 const outputStatusEl = document.querySelector<HTMLElement>("#output-status");
-const debugOutputTargetEl =
-  document.querySelector<HTMLElement>("#debug-output-target");
-const debugOutputFpsEl = document.querySelector<HTMLElement>("#debug-output-fps");
-const debugOutputFramesEl =
-  document.querySelector<HTMLElement>("#debug-output-frames");
-const debugOutputDroppedEl =
-  document.querySelector<HTMLElement>("#debug-output-dropped");
-const debugOutputRawEl = document.querySelector<HTMLElement>("#debug-output-raw");
-const debugOutputUrlEl = document.querySelector<HTMLElement>("#debug-output-url");
-const debugOutputTransparentUrlEl = document.querySelector<HTMLElement>(
-  "#debug-output-transparent-url",
-);
-const copyOutputUrlButton = document.querySelector<HTMLButtonElement>(
-  "#copy-output-url-button",
-);
-const copyTransparentOutputUrlButton = document.querySelector<HTMLButtonElement>(
-  "#copy-transparent-output-url-button",
-);
-const debugOutputObsEl = document.querySelector<HTMLElement>("#debug-output-obs");
-const debugNativeCameraEl = document.querySelector<HTMLElement>(
-  "#debug-native-camera",
-);
-const debugSpoutOutputEl = document.querySelector<HTMLElement>(
-  "#debug-spout-output",
-);
-const debugOutputProbeEl =
-  document.querySelector<HTMLElement>("#debug-output-probe");
 const microphoneSelect =
   document.querySelector<HTMLSelectElement>("#microphone-select");
 const mouthSourceSelect =
@@ -174,15 +155,15 @@ let tuningProfile = createDefaultTuningProfile();
 let calibrationSession: CalibrationSession | null = null;
 let latestExpressionScores: ExpressionScores = zeroExpressionScores();
 let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
-let outputFrameLoop: OutputFrameLoop | null = null;
-let currentOutputStatus: VirtualCameraStatus | null = null;
-let currentNativeCameraStatus: NativeCameraStatus | null = null;
-let currentSpoutOutputStatus: SpoutOutputStatus | null = null;
-let currentOutputUrl: string | null = null;
-let currentTransparentOutputUrl: string | null = null;
-let outputFrameProbePending = false;
-let outputFrameProbeUrl: string | null = null;
+let cameraPreviewVideo: HTMLVideoElement | null = null;
 let cleanOutputMode = false;
+let currentCleanOutputAvatar: CleanOutputStoredAvatar | null = null;
+let cleanOutputBackgroundOverride: CleanOutputBackgroundPayload | null = null;
+let cleanOutputAvatarLoaded = false;
+let latestCleanOutputPose: CleanOutputPosePayload = {
+  expressionIndex: FFLExpression.Normal,
+  headRotation: { pitch: 0, yaw: 0, roll: 0 },
+};
 let lipSyncContext: AudioContext | null = null;
 let lipSyncStream: MediaStream | null = null;
 let lipSyncAnimationId: number | null = null;
@@ -207,53 +188,24 @@ type RendererStatus = {
   message: string;
 };
 
-type VirtualCameraStatus = {
-  running: boolean;
-  supported: boolean;
-  obsDetected: boolean;
-  message: string;
-  width: number;
-  height: number;
-  fps: number;
-  frameCount: number;
-  lastFrameBytes: number;
-  lastRgbaFrameBytes: number;
-  frameUrl: string;
-  pngFrameUrl: string;
-  mjpegUrl: string;
-  transparentSourceUrl: string;
+type CleanOutputStoredAvatar = {
+  name: string;
+  bytes: number[];
 };
 
-type NativeCameraStatus = {
-  platformSupported: boolean;
-  windowsVirtualCameraApiSupported: boolean;
-  windowsBuild: number | null;
-  backendProbeAvailable: boolean;
-  backendSupported: boolean;
-  sourceProbeAvailable: boolean;
-  sourceRegistered: boolean;
-  deviceProbeAvailable: boolean;
-  deviceInstalled: boolean;
-  rawFrameSinkReady: boolean;
-  width: number;
-  height: number;
-  fps: number;
-  publishedFrameCount: number;
-  lastFrameBytes: number;
-  deviceName: string;
-  message: string;
+type CleanOutputBackgroundPayload = {
+  color: string;
+  transparent: boolean;
 };
 
-type SpoutOutputStatus = {
-  supported: boolean;
-  running: boolean;
-  senderName: string;
-  width: number;
-  height: number;
-  fps: number;
-  frameCount: number;
-  lastFrameBytes: number;
-  message: string;
+type CleanOutputPosePayload = {
+  expressionIndex: number;
+  headRotation: HeadRotation;
+};
+
+type CleanOutputAvatarPayload = CleanOutputStoredAvatar & {
+  background: CleanOutputBackgroundPayload;
+  pose: CleanOutputPosePayload;
 };
 
 function setStatus(message: string, tone: "idle" | "error" | "success" = "idle") {
@@ -339,40 +291,6 @@ async function refreshRendererHealth() {
   }
 }
 
-async function refreshNativeCameraStatus() {
-  try {
-    const status = await invoke<NativeCameraStatus>("get_native_camera_status");
-    currentNativeCameraStatus = status;
-    setNativeCameraStatus(status);
-    logRenderEvent("native camera status checked", status);
-    return status;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    currentNativeCameraStatus = null;
-    setNativeCameraStatus(null, `Could not check native camera: ${message}`);
-    console.error("[MiiTuber] get_native_camera_status failed", { error, message });
-    return null;
-  }
-}
-
-async function refreshSpoutOutputStatus() {
-  try {
-    const status = await invoke<SpoutOutputStatus>("get_spout_output_status");
-    currentSpoutOutputStatus = status;
-    setSpoutOutputStatus(status);
-    setOutputButtons();
-    logRenderEvent("Spout2 output status checked", status);
-    return status;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    currentSpoutOutputStatus = null;
-    setSpoutOutputStatus(null, `Could not check Spout2 output: ${message}`);
-    console.error("[MiiTuber] get_spout_output_status failed", { error, message });
-    setOutputButtons();
-    return null;
-  }
-}
-
 function setRenderButtonDisabled(disabled: boolean) {
   if (renderButton) renderButton.disabled = disabled;
 }
@@ -386,28 +304,24 @@ function setTrackingButtons() {
   if (stopTrackingButton) {
     stopTrackingButton.disabled = !tracking;
   }
+
+  if (trackingFpsSelect) {
+    trackingFpsSelect.disabled = tracking;
+  }
+}
+
+function getTrackingFps() {
+  const fps = Number(trackingFpsSelect?.value ?? "60");
+  return Number.isFinite(fps) && fps > 0 ? fps : 60;
 }
 
 function setOutputButtons() {
-  const outputRunning = outputFrameLoop?.isRunning() ?? false;
-  const mjpegRunning = currentOutputStatus?.running ?? false;
-  const spoutRunning = currentSpoutOutputStatus?.running ?? false;
-  const anySinkRunning = mjpegRunning || spoutRunning || outputRunning;
   if (toggleCleanOutputButton) {
     toggleCleanOutputButton.disabled = !avatarLoaded;
     toggleCleanOutputButton.textContent = cleanOutputMode
       ? "Close OBS Clean View"
       : "Open OBS Clean View";
   }
-  if (startOutputButton) startOutputButton.disabled = !avatarLoaded || mjpegRunning;
-  if (stopOutputButton) stopOutputButton.disabled = !mjpegRunning;
-  if (startSpoutOutputButton) {
-    startSpoutOutputButton.disabled =
-      !avatarLoaded || spoutRunning || currentSpoutOutputStatus?.supported === false;
-  }
-  if (stopSpoutOutputButton) stopSpoutOutputButton.disabled = !spoutRunning;
-  if (outputResolutionSelect) outputResolutionSelect.disabled = anySinkRunning;
-  if (outputFpsSelect) outputFpsSelect.disabled = anySinkRunning;
 }
 
 function setLipSyncButtons(running = lipSyncContext !== null) {
@@ -452,150 +366,6 @@ function setDebugValues(
       String(clamp01(1 - holdMs / holdTotal) * 100),
     );
   }
-}
-
-function setOutputDebugValues(stats: OutputFrameLoopStats | null = null) {
-  const settings = getOutputSettings();
-  if (debugOutputTargetEl) {
-    debugOutputTargetEl.textContent = `${settings.width} x ${settings.height} @ ${settings.fps}`;
-  }
-  if (debugOutputFpsEl) {
-    debugOutputFpsEl.textContent = stats ? stats.actualFps.toFixed(1) : "0";
-  }
-  if (debugOutputFramesEl) {
-    debugOutputFramesEl.textContent = stats ? String(stats.frameCount) : "0";
-  }
-  if (debugOutputDroppedEl) {
-    debugOutputDroppedEl.textContent = stats ? String(stats.droppedFrames) : "0";
-  }
-  updateRawFrameDebugValue();
-}
-
-function updateRawFrameDebugValue(status: VirtualCameraStatus | null = currentOutputStatus) {
-  if (!debugOutputRawEl) return;
-
-  if (!status?.running) {
-    debugOutputRawEl.textContent = "Off";
-    return;
-  }
-
-  debugOutputRawEl.textContent =
-    status.lastRgbaFrameBytes > 0
-      ? `${formatBytes(status.lastRgbaFrameBytes)} / frame`
-      : "Off";
-}
-
-function setOutputUrl(url: string | null) {
-  currentOutputUrl = url;
-  if (debugOutputUrlEl) {
-    debugOutputUrlEl.textContent = url ?? "Start output to publish stream.";
-  }
-  if (copyOutputUrlButton) copyOutputUrlButton.disabled = !url;
-}
-
-function setTransparentOutputUrl(url: string | null) {
-  currentTransparentOutputUrl = url;
-  if (debugOutputTransparentUrlEl) {
-    debugOutputTransparentUrlEl.textContent =
-      url ?? "Enable transparent output, then start output.";
-  }
-  if (copyTransparentOutputUrlButton) {
-    copyTransparentOutputUrlButton.disabled = !url;
-  }
-}
-
-function setOutputObsDetected(detected: boolean | null) {
-  if (!debugOutputObsEl) return;
-  debugOutputObsEl.textContent =
-    detected === null ? "Not checked." : detected ? "Yes" : "No";
-}
-
-function setNativeCameraStatus(status: NativeCameraStatus | null, error?: string) {
-  if (!debugNativeCameraEl) return;
-
-  if (error) {
-    debugNativeCameraEl.textContent = error;
-    return;
-  }
-
-  if (!status) {
-    debugNativeCameraEl.textContent = "Not checked.";
-    return;
-  }
-
-  if (status.platformSupported && !status.windowsVirtualCameraApiSupported) {
-    debugNativeCameraEl.textContent = status.windowsBuild
-      ? `Windows build ${status.windowsBuild} is below the native camera API floor.`
-      : "Could not check Windows native camera API support.";
-    return;
-  }
-
-  if (status.platformSupported && !status.backendProbeAvailable) {
-    debugNativeCameraEl.textContent =
-      "Could not query Media Foundation virtual camera support.";
-    return;
-  }
-
-  if (status.platformSupported && !status.backendSupported) {
-    debugNativeCameraEl.textContent =
-      "Media Foundation virtual cameras are not supported here.";
-    return;
-  }
-
-  if (status.platformSupported && !status.sourceProbeAvailable) {
-    debugNativeCameraEl.textContent =
-      "Could not check MiiTuber Media Foundation source registration.";
-    return;
-  }
-
-  if (status.platformSupported && !status.sourceRegistered) {
-    debugNativeCameraEl.textContent =
-      "MiiTuber Media Foundation source is not registered yet.";
-    return;
-  }
-
-  if (status.platformSupported && !status.deviceProbeAvailable) {
-    debugNativeCameraEl.textContent = `Could not check ${status.deviceName} device.`;
-    return;
-  }
-
-  if (status.deviceInstalled) {
-    debugNativeCameraEl.textContent = status.rawFrameSinkReady
-      ? `${status.deviceName} ready, ${formatNativeCameraTarget(status)}, ${status.publishedFrameCount} raw frames, ${formatBytes(status.lastFrameBytes)} last.`
-      : `${status.deviceName} installed, sink not ready.`;
-    return;
-  }
-
-  debugNativeCameraEl.textContent = status.platformSupported
-    ? `${status.deviceName} not installed yet.`
-    : "Windows-first native camera planned.";
-}
-
-function setSpoutOutputStatus(status: SpoutOutputStatus | null, error?: string) {
-  if (!debugSpoutOutputEl) return;
-
-  if (error) {
-    debugSpoutOutputEl.textContent = error;
-    return;
-  }
-
-  if (!status) {
-    debugSpoutOutputEl.textContent = "Not checked.";
-    return;
-  }
-
-  if (!status.supported) {
-    debugSpoutOutputEl.textContent = "Spout2 output is Windows-only.";
-    return;
-  }
-
-  debugSpoutOutputEl.textContent = status.running
-    ? `${status.senderName} running, ${status.width} x ${status.height} @ ${status.fps}, ${status.frameCount} frames, ${formatBytes(status.lastFrameBytes)} last.`
-    : `Stopped. OBS Spout2 Capture will look for sender "${status.senderName}".`;
-}
-
-function setOutputProbe(message: string) {
-  if (debugOutputProbeEl) debugOutputProbeEl.textContent = message;
 }
 
 function setLipSyncDebugValue(score: number) {
@@ -712,20 +482,266 @@ const faceTracker = new FaceTracker();
 const expressionPipeline = new ExpressionPipeline(tuningProfile);
 
 window.addEventListener("resize", () => avatarScene.resize());
-populateExpressionSelect();
-populateTuningControls();
-updateAvatarBackground();
-resetAvatarTrackingState();
-setTrackingButtons();
-setOutputButtons();
-setOutputDebugValues();
-setLipSyncButtons();
-setLipSyncDebugValue(0);
-void refreshRendererHealth();
-void refreshNativeCameraStatus();
-void refreshSpoutOutputStatus();
-void refreshCameraList();
-void refreshMicrophoneList();
+if (isCleanOutputWindow) {
+  void initializeCleanOutputWindow();
+} else {
+  initializeMainWindow();
+}
+
+function initializeMainWindow() {
+  populateExpressionSelect();
+  populateTuningControls();
+  updateAvatarBackground();
+  resetAvatarTrackingState();
+  setTrackingButtons();
+  setOutputButtons();
+  setLipSyncButtons();
+  setLipSyncDebugValue(0);
+  updateCameraPreviewVisibility();
+  void refreshRendererHealth();
+  void refreshCameraList();
+  void refreshMicrophoneList();
+  void listen(CLEAN_OUTPUT_READY_EVENT, () => {
+    void publishCleanOutputAvatarSnapshot();
+  });
+  void listen(CLEAN_OUTPUT_HIDDEN_EVENT, () => {
+    cleanOutputMode = false;
+    setOutputButtons();
+    setOutputStatus("OBS Clean View closed.", "idle");
+  });
+  void WebviewWindow.getCurrent().onCloseRequested(async () => {
+    const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
+    await cleanWindow?.destroy();
+  });
+}
+
+async function initializeCleanOutputWindow() {
+  cleanOutputMode = true;
+  document.documentElement.classList.add("clean-output-mode", "clean-output-window");
+  document.body.classList.add("clean-output-mode", "clean-output-window");
+  if (emptyPreviewEl) emptyPreviewEl.hidden = true;
+
+  await WebviewWindow.getCurrent().onCloseRequested((event) => {
+    event.preventDefault();
+    void hideCurrentCleanOutputWindow();
+  });
+
+  await listen<CleanOutputAvatarPayload>(CLEAN_OUTPUT_AVATAR_EVENT, (event) => {
+    void loadCleanOutputAvatar(event.payload);
+  });
+  await listen<CleanOutputBackgroundPayload>(
+    CLEAN_OUTPUT_BACKGROUND_EVENT,
+    (event) => {
+      applyCleanOutputBackground(event.payload);
+    },
+  );
+  await listen<CleanOutputPosePayload>(CLEAN_OUTPUT_POSE_EVENT, (event) => {
+    applyCleanOutputPose(event.payload);
+  });
+
+  applyCleanOutputBackground({ color: "#e8f0f7", transparent: true });
+  setStatus("Waiting for the main window to send an avatar...", "idle");
+  await emit(CLEAN_OUTPUT_READY_EVENT);
+  window.setTimeout(() => {
+    if (cleanOutputAvatarLoaded) return;
+
+    const storedAvatar = readCleanOutputAvatar();
+    if (!storedAvatar) return;
+
+    void loadCleanOutputAvatar({
+      ...storedAvatar,
+      background: { color: "#e8f0f7", transparent: true },
+      pose: latestCleanOutputPose,
+    });
+  }, 300);
+}
+
+async function openCleanOutputWindow() {
+  if (!avatarLoaded) {
+    setOutputStatus("Render an avatar before opening OBS Clean View.", "error");
+    return;
+  }
+
+  try {
+    const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
+    if (!cleanWindow) {
+      throw new Error(
+        "The configured clean-output window was not found. Restart the Tauri app so the window from tauri.conf.json is created.",
+      );
+    }
+
+    cleanOutputMode = true;
+    setOutputButtons();
+    await cleanWindow.show();
+    await cleanWindow.setFocus();
+    await publishCleanOutputAvatarSnapshot();
+    setOutputStatus(
+      "OBS Clean View is open in its own renderer window.",
+      "success",
+    );
+  } catch (error) {
+    cleanOutputMode = false;
+    setOutputButtons();
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[MiiTuber] OBS Clean View open failed", { error, message });
+    setOutputStatus(`Could not open OBS Clean View: ${message}`, "error");
+  }
+}
+
+async function closeCleanOutputWindow() {
+  try {
+    const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
+    await cleanWindow?.hide();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[MiiTuber] OBS Clean View close failed", { error, message });
+    setOutputStatus(`Could not close OBS Clean View: ${message}`, "error");
+    return;
+  }
+
+  cleanOutputMode = false;
+  setOutputButtons();
+  setOutputStatus("OBS Clean View closed.", "idle");
+}
+
+async function hideCurrentCleanOutputWindow() {
+  try {
+    await WebviewWindow.getCurrent().hide();
+    await emit(CLEAN_OUTPUT_HIDDEN_EVENT);
+  } catch (error) {
+    console.warn("[MiiTuber] clean output hide failed", { error });
+  }
+}
+
+async function publishCleanOutputAvatarSnapshot() {
+  if (isCleanOutputWindow) return;
+  if (!cleanOutputMode) return;
+
+  const avatar = currentCleanOutputAvatar ?? readCleanOutputAvatar();
+  if (!avatar) return;
+
+  await emitTo<CleanOutputAvatarPayload>(
+    CLEAN_OUTPUT_WINDOW_LABEL,
+    CLEAN_OUTPUT_AVATAR_EVENT,
+    {
+      ...avatar,
+      background: readCurrentBackground(),
+      pose: latestCleanOutputPose,
+    },
+  );
+}
+
+function publishCleanOutputBackground() {
+  if (isCleanOutputWindow) return;
+  if (!cleanOutputMode) return;
+
+  void emitTo<CleanOutputBackgroundPayload>(
+    CLEAN_OUTPUT_WINDOW_LABEL,
+    CLEAN_OUTPUT_BACKGROUND_EVENT,
+    readCurrentBackground(),
+  );
+}
+
+function publishCleanOutputPose() {
+  if (isCleanOutputWindow) return;
+  if (!cleanOutputMode) return;
+
+  void emitTo<CleanOutputPosePayload>(
+    CLEAN_OUTPUT_WINDOW_LABEL,
+    CLEAN_OUTPUT_POSE_EVENT,
+    latestCleanOutputPose,
+  );
+}
+
+async function loadCleanOutputAvatar(payload: CleanOutputAvatarPayload) {
+  try {
+    cleanOutputAvatarLoaded = true;
+    applyCleanOutputBackground(payload.background);
+    const glbBytes = await invoke<number[]>("render_mii_glb", {
+      miiBytes: payload.bytes,
+    });
+    await avatarScene.loadModelFromGlbBytes(glbBytes);
+    applyCleanOutputPose(payload.pose);
+    if (emptyPreviewEl) emptyPreviewEl.hidden = true;
+    setStatus(`OBS Clean View rendering ${payload.name}.`, "success");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[MiiTuber] clean output avatar load failed", {
+      error,
+      message,
+    });
+    setStatus(`Could not load OBS Clean View avatar: ${message}`, "error");
+  }
+}
+
+function applyCleanOutputBackground(background: CleanOutputBackgroundPayload) {
+  cleanOutputBackgroundOverride = background;
+  updateAvatarBackground();
+}
+
+function applyCleanOutputPose(pose: CleanOutputPosePayload) {
+  latestCleanOutputPose = pose;
+  avatarScene.setExpression(pose.expressionIndex);
+  avatarScene.setHeadRotation(pose.headRotation);
+}
+
+function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
+  latestCleanOutputPose = { expressionIndex, headRotation };
+  avatarScene.setExpression(expressionIndex);
+  avatarScene.setHeadRotation(headRotation);
+  publishCleanOutputPose();
+}
+
+function readCurrentBackground(): CleanOutputBackgroundPayload {
+  if (cleanOutputBackgroundOverride) return cleanOutputBackgroundOverride;
+
+  return {
+    color: backgroundColorInput?.value ?? "#e8f0f7",
+    transparent: transparentBackgroundInput?.checked ?? false,
+  };
+}
+
+function readCleanOutputAvatar(): CleanOutputStoredAvatar | null {
+  try {
+    const raw = localStorage.getItem(CLEAN_OUTPUT_AVATAR_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<CleanOutputStoredAvatar>;
+    if (typeof parsed.name !== "string" || !Array.isArray(parsed.bytes)) {
+      return null;
+    }
+    if (
+      parsed.bytes.length === 0 ||
+      !parsed.bytes.every(
+        (value) => Number.isInteger(value) && value >= 0 && value <= 255,
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      name: parsed.name,
+      bytes: parsed.bytes,
+    };
+  } catch (error) {
+    console.warn("[MiiTuber] could not read OBS clean avatar", { error });
+    return null;
+  }
+}
+
+function saveCleanOutputAvatar(avatar: CleanOutputStoredAvatar) {
+  currentCleanOutputAvatar = avatar;
+  try {
+    localStorage.setItem(CLEAN_OUTPUT_AVATAR_STORAGE_KEY, JSON.stringify(avatar));
+  } catch (error) {
+    console.warn("[MiiTuber] could not save OBS clean avatar", { error });
+  }
+}
+
+function clearCleanOutputAvatar() {
+  currentCleanOutputAvatar = null;
+  localStorage.removeItem(CLEAN_OUTPUT_AVATAR_STORAGE_KEY);
+}
 
 function populateExpressionSelect() {
   if (!expressionSelect) return;
@@ -813,7 +829,7 @@ async function refreshMicrophoneList() {
 
 expressionSelect?.addEventListener("change", () => {
   const expressionIndex = Number(expressionSelect.value);
-  avatarScene.setExpression(expressionIndex);
+  setAvatarPose(expressionIndex, latestCleanOutputPose.headRotation);
   logRenderEvent("manual expression selected", { expressionIndex });
 });
 
@@ -826,7 +842,6 @@ debugMaterialsInput?.addEventListener("change", () => {
 
 transparentBackgroundInput?.addEventListener("change", () => {
   updateAvatarBackground();
-  updateOutputTransparencyUi();
   logRenderEvent("transparent background toggled", {
     enabled: transparentBackgroundInput.checked,
   });
@@ -839,15 +854,11 @@ backgroundColorInput?.addEventListener("input", () => {
   });
 });
 
-outputResolutionSelect?.addEventListener("change", () => setOutputDebugValues());
-outputFpsSelect?.addEventListener("change", () => setOutputDebugValues());
-
-copyOutputUrlButton?.addEventListener("click", () => {
-  void copyOutputUrl(currentOutputUrl, "Opaque OBS URL");
-});
-
-copyTransparentOutputUrlButton?.addEventListener("click", () => {
-  void copyOutputUrl(currentTransparentOutputUrl, "Transparent OBS URL");
+showCameraPreviewInput?.addEventListener("change", () => {
+  updateCameraPreviewVisibility();
+  logRenderEvent("camera preview toggled", {
+    enabled: showCameraPreviewInput.checked,
+  });
 });
 
 toggleCleanOutputButton?.addEventListener("click", () => {
@@ -856,6 +867,10 @@ toggleCleanOutputButton?.addEventListener("click", () => {
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && cleanOutputMode) {
+    if (isCleanOutputWindow) {
+      void hideCurrentCleanOutputWindow();
+      return;
+    }
     setCleanOutputMode(false);
   }
 });
@@ -1130,8 +1145,7 @@ function handleTrackingFrame({ results, trackingFps, detectMs }: FaceTrackerFram
   const transformMatrix = matrixData ? new Float32Array(matrixData) : undefined;
 
   if (blendshapes.length === 0) {
-    avatarScene.setExpression(FFLExpression.Normal);
-    avatarScene.setHeadRotation({ pitch: 0, yaw: 0, roll: 0 });
+    setAvatarPose(FFLExpression.Normal, { pitch: 0, yaw: 0, roll: 0 });
     if (expressionSelect) expressionSelect.value = String(FFLExpression.Normal);
     setDebugValues(
       FFLExpression.Normal,
@@ -1158,8 +1172,7 @@ function handleTrackingFrame({ results, trackingFps, detectMs }: FaceTrackerFram
   latestExpressionScores = pipelineFrame.rawMapped.scores;
   latestExpressionSignals = pipelineFrame.signals;
 
-  avatarScene.setExpression(pipelineFrame.expressionIndex);
-  avatarScene.setHeadRotation(pipelineFrame.headRotation);
+  setAvatarPose(pipelineFrame.expressionIndex, pipelineFrame.headRotation);
 
   if (expressionSelect) expressionSelect.value = String(pipelineFrame.expressionIndex);
   setDebugValues(
@@ -1341,10 +1354,12 @@ startTrackingButton?.addEventListener("click", async () => {
       {
         onFrame: handleTrackingFrame,
         onError: handleTrackingRuntimeError,
+        onVideoReady: attachCameraPreview,
+        onVideoStopped: detachCameraPreview,
       },
       {
         deviceId: cameraSelect?.value || undefined,
-        maxFps: 30,
+        maxFps: getTrackingFps(),
       },
     );
     await refreshCameraList();
@@ -1392,6 +1407,42 @@ function formatTrackingError(error: unknown) {
   }
 }
 
+function attachCameraPreview(video: HTMLVideoElement) {
+  cameraPreviewVideo = video;
+  video.classList.add("camera-preview__video");
+  video.setAttribute("aria-label", "Live camera preview");
+  if (cameraPreviewFrameEl) {
+    cameraPreviewFrameEl.textContent = "";
+    cameraPreviewFrameEl.append(video);
+  }
+  if (cameraPreviewStatusEl) cameraPreviewStatusEl.textContent = "Live";
+  updateCameraPreviewVisibility();
+}
+
+function detachCameraPreview() {
+  cameraPreviewVideo?.remove();
+  cameraPreviewVideo = null;
+  if (cameraPreviewFrameEl) {
+    cameraPreviewFrameEl.textContent = "";
+    const placeholder = document.createElement("p");
+    placeholder.textContent = "Start tracking to show the camera feed.";
+    cameraPreviewFrameEl.append(placeholder);
+  }
+  if (cameraPreviewStatusEl) cameraPreviewStatusEl.textContent = "Waiting";
+  updateCameraPreviewVisibility();
+}
+
+function updateCameraPreviewVisibility() {
+  if (!cameraPreviewEl) return;
+
+  const shouldShow =
+    !isCleanOutputWindow &&
+    Boolean(showCameraPreviewInput?.checked) &&
+    Boolean(cameraPreviewVideo);
+
+  cameraPreviewEl.hidden = !shouldShow;
+}
+
 stopTrackingButton?.addEventListener("click", () => {
   stopTracking("Tracking stopped. Camera released.");
 });
@@ -1407,325 +1458,54 @@ function stopTracking(message?: string) {
   }
 }
 
-startOutputButton?.addEventListener("click", async () => {
-  if (!avatarLoaded) {
-    setOutputStatus("Render an avatar before starting output.", "error");
-    return;
-  }
-
-  const settings = getOutputSettings();
-
-  try {
-    setOutputStatus("Checking output sinks...");
-    const nativeStatus = await refreshNativeCameraStatus();
-    setOutputStatus("Starting output session in Rust...");
-    const status = await invoke<VirtualCameraStatus>("start_virtual_camera", {
-      request: settings,
-    });
-
-    ensureOutputFrameLoop(settings);
-    currentOutputStatus = status;
-    outputFrameProbePending = true;
-    outputFrameProbeUrl = status.frameUrl;
-    setOutputButtons();
-    setOutputStatus(
-      outputStatusMessage(status),
-      status.obsDetected ? "success" : "idle",
-    );
-    setOutputUrl(status.mjpegUrl);
-    setTransparentOutputUrl(
-      transparentBackgroundInput?.checked ? status.transparentSourceUrl : null,
-    );
-    setOutputObsDetected(status.obsDetected);
-    updateRawFrameDebugValue(status);
-    logRenderEvent("virtual camera output started", settings);
-    if (nativeStatus?.rawFrameSinkReady) {
-      logRenderEvent("native raw frame sink ready at output start", nativeStatus);
-    }
-  } catch (error) {
-    outputFrameLoop = null;
-    currentOutputStatus = null;
-    setOutputButtons();
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[MiiTuber] virtual camera start failed", { error, message });
-    setOutputStatus(`Could not start output: ${message}`, "error");
-  }
-});
-
-stopOutputButton?.addEventListener("click", () => {
-  void stopOutput("Output stopped.");
-});
-
-startSpoutOutputButton?.addEventListener("click", async () => {
-  if (!avatarLoaded) {
-    setOutputStatus("Render an avatar before starting Spout output.", "error");
-    return;
-  }
-
-  const settings = getOutputSettings();
-
-  try {
-    setOutputStatus("Starting Spout2 sender...");
-    const status = await invoke<SpoutOutputStatus>("start_spout_output", {
-      request: settings,
-    });
-    currentSpoutOutputStatus = status;
-    setSpoutOutputStatus(status);
-    ensureOutputFrameLoop(settings);
-    setOutputButtons();
-    setOutputStatus(status.message, "success");
-    logRenderEvent("Spout2 output started", status);
-  } catch (error) {
-    currentSpoutOutputStatus = null;
-    setOutputButtons();
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[MiiTuber] Spout2 output start failed", { error, message });
-    setSpoutOutputStatus(null, `Could not start Spout2 output: ${message}`);
-    setOutputStatus(`Could not start Spout2 output: ${message}`, "error");
-  }
-});
-
-stopSpoutOutputButton?.addEventListener("click", () => {
-  void stopSpoutOutput("Spout2 output stopped.");
-});
-
-function ensureOutputFrameLoop(settings = getOutputSettings()) {
-  if (outputFrameLoop?.isRunning()) return;
-
-  outputFrameLoop = new OutputFrameLoop({
-    ...settings,
-    captureFrame: (width, height) => avatarScene.captureJpegFrame(width, height),
-    publishFrame,
-    onStats: setOutputDebugValues,
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("[MiiTuber] output loop failed", { error, message });
-      currentOutputStatus = null;
-      currentSpoutOutputStatus = null;
-      setTransparentOutputUrl(null);
-      setSpoutOutputStatus(null, `Output loop stopped: ${message}`);
-      setOutputStatus(`Output stopped: ${message}`, "error");
-      setOutputButtons();
-    },
-  });
-  outputFrameLoop.start();
-}
-
-function stopOutputFrameLoopIfIdle() {
-  if (currentOutputStatus?.running || currentSpoutOutputStatus?.running) return;
-
-  outputFrameLoop?.stop();
-  outputFrameLoop = null;
-  setOutputDebugValues();
-}
-
-async function stopOutput(message?: string) {
-  currentOutputStatus = null;
-  outputFrameProbePending = false;
-  outputFrameProbeUrl = null;
-  setOutputButtons();
-  setOutputDebugValues();
-  setOutputUrl(null);
-  setTransparentOutputUrl(null);
-  setOutputObsDetected(null);
-  updateRawFrameDebugValue(null);
-  setOutputProbe("Not checked.");
-
-  try {
-    const status = await invoke<VirtualCameraStatus>("stop_virtual_camera");
-    currentOutputStatus = status.running ? status : null;
-  } catch (error) {
-    console.warn("[MiiTuber] virtual camera stop failed", { error });
-  }
-
-  stopOutputFrameLoopIfIdle();
-
-  if (message) setOutputStatus(message);
-}
-
-async function stopSpoutOutput(message?: string) {
-  try {
-    const status = await invoke<SpoutOutputStatus>("stop_spout_output");
-    currentSpoutOutputStatus = status;
-    setSpoutOutputStatus(status);
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.warn("[MiiTuber] Spout2 output stop failed", { error });
-    setSpoutOutputStatus(null, `Could not stop Spout2 output: ${errorMessage}`);
-  }
-
-  stopOutputFrameLoopIfIdle();
-  setOutputButtons();
-  if (message) setOutputStatus(message);
-}
-
-async function publishFrame(
-  frame: Uint8Array,
-  metadata: OutputFrameMetadata,
-) {
-  const pngFrame = transparentBackgroundInput?.checked
-    ? await avatarScene.capturePngFrame(metadata.width, metadata.height)
-    : null;
-  const rgbaFrame = currentNativeCameraStatus?.rawFrameSinkReady
-    || currentSpoutOutputStatus?.running
-    ? avatarScene.captureRgbaFrame(metadata.width, metadata.height)
-    : null;
-
-  const status = await invoke<VirtualCameraStatus>("publish_virtual_camera_frame", {
-    request: {
-      width: metadata.width,
-      height: metadata.height,
-      fps: metadata.fps,
-      frameIndex: metadata.frameIndex,
-      jpegBytes: Array.from(frame),
-      pngBytes: pngFrame ? Array.from(pngFrame) : null,
-      rgbaBytes: rgbaFrame ? Array.from(rgbaFrame) : null,
-    },
-  });
-  currentOutputStatus = status;
-  updateRawFrameDebugValue(status);
-  if (currentSpoutOutputStatus?.running) {
-    currentSpoutOutputStatus = {
-      ...currentSpoutOutputStatus,
-      frameCount: metadata.frameIndex,
-      lastFrameBytes: rgbaFrame?.length ?? 0,
-    };
-    setSpoutOutputStatus(currentSpoutOutputStatus);
-  }
-
-  if (outputFrameProbePending && outputFrameProbeUrl) {
-    outputFrameProbePending = false;
-    void probeOutputFrame(outputFrameProbeUrl);
-  }
-}
-
-async function probeOutputFrame(url: string) {
-  if (outputFrameProbeUrl !== url) return;
-
-  setOutputProbe("Checking local JPEG endpoint...");
-
-  try {
-    const response = await fetch(url, { cache: "no-store" });
-    if (outputFrameProbeUrl !== url) return;
-
-    if (!response.ok) {
-      setOutputProbe(`HTTP ${response.status} from local frame endpoint.`);
-      return;
-    }
-
-    const contentType = response.headers.get("content-type") ?? "";
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (outputFrameProbeUrl !== url) return;
-
-    const isJpeg =
-      bytes.length >= 3 &&
-      bytes[0] === 0xff &&
-      bytes[1] === 0xd8 &&
-      bytes[2] === 0xff;
-
-    if (!contentType.includes("image/jpeg") || !isJpeg) {
-      setOutputProbe("Endpoint responded, but not with a JPEG frame.");
-      return;
-    }
-
-    setOutputProbe(`OK, served ${(bytes.length / 1024).toFixed(1)} KB JPEG.`);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    setOutputProbe(`Could not fetch local frame: ${message}`);
-  }
-}
-
-async function copyOutputUrl(url: string | null, label: string) {
-  if (!url) {
-    setOutputStatus(`${label} is not available yet. Start output first.`, "error");
-    return;
-  }
-
-  try {
-    await navigator.clipboard.writeText(url);
-    setOutputStatus(`Copied ${label}.`, "success");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn("[MiiTuber] output URL copy failed", { error, message });
-    setOutputStatus(`Could not copy ${label}: ${message}`, "error");
-  }
-}
-
-function outputStatusMessage(status: VirtualCameraStatus) {
-  if (transparentBackgroundInput?.checked) {
-    return `${status.message} For transparent OBS compositing, use Browser Source: ${status.transparentSourceUrl}`;
-  }
-
-  return status.message;
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  const kib = bytes / 1024;
-  if (kib < 1024) return `${kib.toFixed(1)} KiB`;
-  return `${(kib / 1024).toFixed(1)} MiB`;
-}
-
-function formatNativeCameraTarget(status: NativeCameraStatus) {
-  if (status.width <= 0 || status.height <= 0 || status.fps <= 0) {
-    return "no output target";
-  }
-
-  return `${status.width} x ${status.height} @ ${status.fps}`;
-}
-
-function updateOutputTransparencyUi() {
-  if (!currentOutputStatus) return;
-
-  setTransparentOutputUrl(
-    transparentBackgroundInput?.checked
-      ? currentOutputStatus.transparentSourceUrl
-      : null,
-  );
-  setOutputStatus(
-    outputStatusMessage(currentOutputStatus),
-    currentOutputStatus.obsDetected ? "success" : "idle",
-  );
-}
-
-function getOutputSettings() {
-  const resolution = outputResolutionSelect?.value ?? "1280x720";
-  const [widthValue, heightValue] = resolution.split("x").map(Number);
-  const fps = Number(outputFpsSelect?.value ?? "30");
-
-  return {
-    width: Number.isFinite(widthValue) ? widthValue : 1280,
-    height: Number.isFinite(heightValue) ? heightValue : 720,
-    fps: fps === 60 ? 60 : 30,
-  };
-}
-
 function setCleanOutputMode(enabled: boolean) {
-  cleanOutputMode = enabled;
-  document.body.classList.toggle("clean-output-mode", enabled);
-  updateAvatarBackground();
-  avatarScene.resize();
-  setOutputButtons();
-  setOutputStatus(
-    enabled
-      ? "OBS clean view is active. Capture this window, then press Escape to return."
-      : "OBS clean view closed.",
-    enabled ? "success" : "idle",
-  );
-  logRenderEvent("OBS clean output mode toggled", { enabled });
+  if (isCleanOutputWindow) {
+    cleanOutputMode = enabled;
+    document.documentElement.classList.toggle("clean-output-mode", enabled);
+    document.body.classList.toggle("clean-output-mode", enabled);
+    updateAvatarBackground();
+    requestAnimationFrame(() => {
+      avatarScene.resize();
+      if (enabled) avatarScene.resetCameraView();
+    });
+    return;
+  }
+
+  if (enabled) {
+    void openCleanOutputWindow();
+  } else {
+    void closeCleanOutputWindow();
+  }
+  logRenderEvent("OBS clean output popup toggled", { enabled });
 }
 
 function updateAvatarBackground() {
-  const color = backgroundColorInput?.value ?? "#e8f0f7";
-  const transparent = transparentBackgroundInput?.checked ?? false;
+  const background = readCurrentBackground();
+  const { color, transparent } = background;
+
+  if (isCleanOutputWindow) {
+    const outputColor = transparent ? "transparent" : color;
+    avatarScene.setBackground({ color, transparent });
+    document.documentElement.classList.toggle("transparent-output", transparent);
+    document.body.classList.toggle("transparent-output", transparent);
+    document.documentElement.style.setProperty("--avatar-background", outputColor);
+    document.documentElement.style.backgroundColor = outputColor;
+    document.body.style.backgroundColor = outputColor;
+    canvas.style.backgroundColor = outputColor;
+    return;
+  }
+
   avatarScene.setBackground({ color, transparent });
   document.documentElement.style.setProperty("--avatar-background", color);
+  document.documentElement.style.backgroundColor = color;
+  document.body.style.backgroundColor = color;
+  canvas.style.backgroundColor = color;
+  publishCleanOutputBackground();
 }
 
 function resetAvatarTrackingState() {
   expressionPipeline.reset();
-  avatarScene.setExpression(FFLExpression.Normal);
-  avatarScene.setHeadRotation({ pitch: 0, yaw: 0, roll: 0 });
+  setAvatarPose(FFLExpression.Normal, { pitch: 0, yaw: 0, roll: 0 });
   if (expressionSelect) expressionSelect.value = "0";
   setDebugValues(
     FFLExpression.Normal,
@@ -1799,9 +1579,9 @@ fileInput?.addEventListener("change", () => {
   selectedFile = fileInput.files?.[0] ?? null;
   avatarLoaded = false;
   avatarHasExpressionVariants = false;
+  clearCleanOutputAvatar();
   setTrackingButtons();
   setCleanOutputMode(false);
-  void stopOutput("Output stopped because the avatar file changed.");
 
   if (!selectedFile) {
     logRenderEvent("file selection cleared");
@@ -1866,6 +1646,11 @@ renderButton?.addEventListener("click", async () => {
 
     const glbBytes = await invoke<number[]>("render_mii_glb", { miiBytes });
     const loadResult = await avatarScene.loadModelFromGlbBytes(glbBytes);
+    saveCleanOutputAvatar({
+      name: selectedFile.name,
+      bytes: miiBytes,
+    });
+    setAvatarPose(FFLExpression.Normal, { pitch: 0, yaw: 0, roll: 0 });
 
     if (expressionSelect) {
       expressionSelect.disabled = loadResult.expressionCount === 0;
@@ -1875,6 +1660,7 @@ renderButton?.addEventListener("click", async () => {
     avatarHasExpressionVariants = loadResult.expressionCount > 0;
     setTrackingButtons();
     setOutputButtons();
+    void publishCleanOutputAvatarSnapshot();
 
     logRenderEvent("render_mii_glb succeeded", {
       name: selectedFile.name,
@@ -1915,6 +1701,5 @@ renderButton?.addEventListener("click", async () => {
 
 window.addEventListener("beforeunload", () => {
   faceTracker.stop();
-  outputFrameLoop?.stop();
   stopLipSync();
 });
