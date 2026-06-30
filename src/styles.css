@@ -212,6 +212,27 @@ select {
   cursor: not-allowed;
 }
 
+.checker-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  cursor: pointer;
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(45deg, #c2c8ce 25%, transparent 25%),
+    linear-gradient(-45deg, #c2c8ce 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #c2c8ce 75%),
+    linear-gradient(-45deg, transparent 75%, #c2c8ce 75%);
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+  background-size: 10px 10px;
+}
+
+.checker-btn:hover {
+  border-color: #aab0b8;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -368,26 +389,18 @@ select {
   display: grid;
   place-items: center;
   height: 100%;
-  padding: 16px;
+  padding: 0;
 }
 
 .preview-frame {
   position: relative;
   display: grid;
   place-items: center;
-  height: min(100%, 640px);
-  aspect-ratio: 1;
-  max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background:
-    linear-gradient(45deg, #e2e5e9 25%, transparent 25%),
-    linear-gradient(-45deg, #e2e5e9 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #e2e5e9 75%),
-    linear-gradient(-45deg, transparent 75%, #e2e5e9 75%);
-  background-color: #f4f5f6;
-  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
-  background-size: 24px 24px;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--avatar-background);
   overflow: hidden;
 }
 
@@ -1047,5 +1060,54 @@ body.clean-output-mode .preview-frame {
 }
 
 body.clean-output-mode .empty-preview {
+  display: none;
+}
+
+/* ---- Capture isolate (main window transparent for OBS) ---- */
+html.capture-isolate,
+body.capture-isolate,
+body.capture-isolate .preview-panel,
+body.capture-isolate .preview-frame,
+body.capture-isolate #mii-viewer {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+html.capture-isolate,
+body.capture-isolate {
+  overflow: hidden;
+}
+
+body.capture-isolate .appbar,
+body.capture-isolate .side-rail,
+body.capture-isolate .menu-popover,
+body.capture-isolate .status-toast,
+body.capture-isolate .library-screen,
+body.capture-isolate .modal-scrim {
+  display: none !important;
+}
+
+body.capture-isolate .content {
+  height: 100vh;
+}
+
+body.capture-isolate .workspace {
+  height: 100vh;
+}
+
+body.capture-isolate .preview-panel {
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+}
+
+body.capture-isolate .preview-frame {
+  width: 100vw;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+}
+
+body.capture-isolate .empty-preview {
   display: none;
 }

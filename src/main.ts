@@ -63,6 +63,9 @@ const backToLibraryButton =
 const workspaceAvatarNameEl = document.querySelector<HTMLElement>(
   "#workspace-avatar-name",
 );
+const isolateCaptureButton = document.querySelector<HTMLButtonElement>(
+  "#isolate-capture-button",
+);
 const avatarGridEl = document.querySelector<HTMLElement>("#avatar-grid");
 const addAvatarTile = document.querySelector<HTMLButtonElement>("#add-avatar-tile");
 const menuItems = Array.from(
@@ -174,6 +177,7 @@ let calibrationSession: CalibrationSession | null = null;
 let latestExpressionScores: ExpressionScores = zeroExpressionScores();
 let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
 let cleanOutputMode = false;
+let isolateMode = false;
 let currentCleanOutputAvatar: CleanOutputStoredAvatar | null = null;
 let cleanOutputBackgroundOverride: CleanOutputBackgroundPayload | null = null;
 let cleanOutputAvatarLoaded = false;
@@ -703,7 +707,7 @@ function readCurrentBackground(): CleanOutputBackgroundPayload {
 
   return {
     color: backgroundColorInput?.value ?? "#e8f0f7",
-    transparent: transparentBackgroundInput?.checked ?? false,
+    transparent: isolateMode || (transparentBackgroundInput?.checked ?? false),
   };
 }
 
@@ -859,8 +863,19 @@ toggleCleanOutputButton?.addEventListener("click", () => {
   setCleanOutputMode(!cleanOutputMode);
 });
 
+isolateCaptureButton?.addEventListener("click", () => {
+  setIsolateMode(true);
+});
+
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && cleanOutputMode) {
+  if (event.key !== "Escape") return;
+
+  if (isolateMode && !isCleanOutputWindow) {
+    setIsolateMode(false);
+    return;
+  }
+
+  if (cleanOutputMode) {
     if (isCleanOutputWindow) {
       void hideCurrentCleanOutputWindow();
       return;
@@ -1435,6 +1450,30 @@ function setCleanOutputMode(enabled: boolean) {
   logRenderEvent("OBS clean output popup toggled", { enabled });
 }
 
+function setIsolateMode(enabled: boolean) {
+  isolateMode = enabled;
+  document.documentElement.classList.toggle("capture-isolate", enabled);
+  document.body.classList.toggle("capture-isolate", enabled);
+
+  if (enabled) {
+    for (const popover of Array.from(
+      document.querySelectorAll<HTMLElement>(".menu-popover"),
+    )) {
+      popover.hidden = true;
+    }
+    for (const item of menuItems) {
+      item.dataset.open = "false";
+    }
+  }
+
+  updateAvatarBackground();
+  requestAnimationFrame(() => {
+    avatarScene.resize();
+    if (enabled) avatarScene.resetCameraView();
+  });
+  logRenderEvent("capture isolate toggled", { enabled });
+}
+
 function updateAvatarBackground() {
   const background = readCurrentBackground();
   const { color, transparent } = background;
@@ -1451,11 +1490,12 @@ function updateAvatarBackground() {
     return;
   }
 
+  const mainColor = transparent ? "transparent" : color;
   avatarScene.setBackground({ color, transparent });
-  document.documentElement.style.setProperty("--avatar-background", color);
-  document.documentElement.style.backgroundColor = color;
-  document.body.style.backgroundColor = color;
-  canvas.style.backgroundColor = color;
+  document.documentElement.style.setProperty("--avatar-background", mainColor);
+  document.documentElement.style.backgroundColor = mainColor;
+  document.body.style.backgroundColor = mainColor;
+  canvas.style.backgroundColor = mainColor;
   publishCleanOutputBackground();
 }
 
