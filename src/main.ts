@@ -30,6 +30,16 @@ import {
   type SignalName,
   type TuningProfile,
 } from "./lib/tuningProfile";
+import {
+  addAvatar,
+  getAvatar,
+  readLibrary,
+  removeAvatar,
+  renameAvatar,
+  sanitizeName,
+  setAvatarThumbnail,
+  type LibraryAvatar,
+} from "./lib/avatarLibrary";
 
 const CLEAN_OUTPUT_WINDOW_LABEL = "clean-output";
 const CLEAN_OUTPUT_VIEW = "clean-output";
@@ -44,11 +54,28 @@ const isCleanOutputWindow =
   new URLSearchParams(window.location.search).get("view") === CLEAN_OUTPUT_VIEW;
 
 const fileInput = document.querySelector<HTMLInputElement>("#mii-file");
-const renderButton = document.querySelector<HTMLButtonElement>("#render-button");
 const statusEl = document.querySelector<HTMLElement>("#status");
 const viewerCanvas = document.querySelector<HTMLCanvasElement>("#mii-viewer");
-const fileNameEl = document.querySelector<HTMLElement>("#file-name");
 const rendererHealthEl = document.querySelector<HTMLElement>("#renderer-health");
+const appShellEl = document.querySelector<HTMLElement>(".app-shell");
+const backToLibraryButton =
+  document.querySelector<HTMLButtonElement>("#back-to-library");
+const workspaceAvatarNameEl = document.querySelector<HTMLElement>(
+  "#workspace-avatar-name",
+);
+const avatarGridEl = document.querySelector<HTMLElement>("#avatar-grid");
+const addAvatarTile = document.querySelector<HTMLButtonElement>("#add-avatar-tile");
+const menuItems = Array.from(
+  document.querySelectorAll<HTMLButtonElement>(".rail-item[data-menu]"),
+);
+const importModal = document.querySelector<HTMLElement>("#import-modal");
+const importClose = document.querySelector<HTMLButtonElement>("#import-close");
+const importCancel = document.querySelector<HTMLButtonElement>("#import-cancel");
+const importPick = document.querySelector<HTMLButtonElement>("#import-pick");
+const importPreviewEl = document.querySelector<HTMLElement>("#import-preview");
+const importNameInput = document.querySelector<HTMLInputElement>("#import-name");
+const importStatusEl = document.querySelector<HTMLElement>("#import-status");
+const importSaveButton = document.querySelector<HTMLButtonElement>("#import-save");
 const emptyPreviewEl = document.querySelector<HTMLElement>(".empty-preview");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
 const debugMaterialsInput =
@@ -68,16 +95,6 @@ const trackingStatusEl = document.querySelector<HTMLElement>("#tracking-status")
 const cameraSelect = document.querySelector<HTMLSelectElement>("#camera-select");
 const trackingFpsSelect = document.querySelector<HTMLSelectElement>(
   "#tracking-fps-select",
-);
-const showCameraPreviewInput = document.querySelector<HTMLInputElement>(
-  "#show-camera-preview",
-);
-const cameraPreviewEl = document.querySelector<HTMLElement>("#camera-preview");
-const cameraPreviewFrameEl = document.querySelector<HTMLElement>(
-  "#camera-preview-frame",
-);
-const cameraPreviewStatusEl = document.querySelector<HTMLElement>(
-  "#camera-preview-status",
 );
 const debugExpressionEl = document.querySelector<HTMLElement>("#debug-expression");
 const debugChannelsEl = document.querySelector<HTMLElement>("#debug-channels");
@@ -147,7 +164,8 @@ const debugLipSyncMouthEl = document.querySelector<HTMLElement>(
   "#debug-lip-sync-mouth",
 );
 
-let selectedFile: File | null = null;
+let pendingImport: { bytes: number[]; thumbnailDataUrl: string | null } | null = null;
+let currentAvatarId: string | null = null;
 let avatarLoaded = false;
 let avatarHasExpressionVariants = false;
 let tracking = false;
@@ -155,7 +173,6 @@ let tuningProfile = createDefaultTuningProfile();
 let calibrationSession: CalibrationSession | null = null;
 let latestExpressionScores: ExpressionScores = zeroExpressionScores();
 let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
-let cameraPreviewVideo: HTMLVideoElement | null = null;
 let cleanOutputMode = false;
 let currentCleanOutputAvatar: CleanOutputStoredAvatar | null = null;
 let cleanOutputBackgroundOverride: CleanOutputBackgroundPayload | null = null;
@@ -269,16 +286,6 @@ function logRenderEvent(message: string, details: Record<string, unknown> = {}) 
   console.info(`[MiiTuber] ${message}`, details);
 }
 
-function validateFileExtension(file: File) {
-  const lowerName = file.name.toLowerCase();
-  return (
-    lowerName.endsWith(".ffsd") ||
-    lowerName.endsWith(".miic") ||
-    lowerName.endsWith(".bin") ||
-    lowerName.endsWith(".dat")
-  );
-}
-
 async function refreshRendererHealth() {
   try {
     const status = await invoke<RendererStatus>("check_renderer_status");
@@ -289,10 +296,6 @@ async function refreshRendererHealth() {
     setRendererHealth(`Could not check renderer: ${message}`, "error");
     console.error("[MiiTuber] check_renderer_status failed", { error, message });
   }
-}
-
-function setRenderButtonDisabled(disabled: boolean) {
-  if (renderButton) renderButton.disabled = disabled;
 }
 
 function setTrackingButtons() {
@@ -497,7 +500,9 @@ function initializeMainWindow() {
   setOutputButtons();
   setLipSyncButtons();
   setLipSyncDebugValue(0);
-  updateCameraPreviewVisibility();
+  setAppMode("library");
+  renderLibraryGrid();
+  wireLibraryControls();
   void refreshRendererHealth();
   void refreshCameraList();
   void refreshMicrophoneList();
@@ -517,6 +522,7 @@ function initializeMainWindow() {
 
 async function initializeCleanOutputWindow() {
   cleanOutputMode = true;
+  setAppMode("workspace");
   document.documentElement.classList.add("clean-output-mode", "clean-output-window");
   document.body.classList.add("clean-output-mode", "clean-output-window");
   if (emptyPreviewEl) emptyPreviewEl.hidden = true;
@@ -738,11 +744,6 @@ function saveCleanOutputAvatar(avatar: CleanOutputStoredAvatar) {
   }
 }
 
-function clearCleanOutputAvatar() {
-  currentCleanOutputAvatar = null;
-  localStorage.removeItem(CLEAN_OUTPUT_AVATAR_STORAGE_KEY);
-}
-
 function populateExpressionSelect() {
   if (!expressionSelect) return;
 
@@ -851,13 +852,6 @@ backgroundColorInput?.addEventListener("input", () => {
   updateAvatarBackground();
   logRenderEvent("background color changed", {
     color: backgroundColorInput.value,
-  });
-});
-
-showCameraPreviewInput?.addEventListener("change", () => {
-  updateCameraPreviewVisibility();
-  logRenderEvent("camera preview toggled", {
-    enabled: showCameraPreviewInput.checked,
   });
 });
 
@@ -1354,8 +1348,6 @@ startTrackingButton?.addEventListener("click", async () => {
       {
         onFrame: handleTrackingFrame,
         onError: handleTrackingRuntimeError,
-        onVideoReady: attachCameraPreview,
-        onVideoStopped: detachCameraPreview,
       },
       {
         deviceId: cameraSelect?.value || undefined,
@@ -1405,42 +1397,6 @@ function formatTrackingError(error: unknown) {
     default:
       return error.message;
   }
-}
-
-function attachCameraPreview(video: HTMLVideoElement) {
-  cameraPreviewVideo = video;
-  video.classList.add("camera-preview__video");
-  video.setAttribute("aria-label", "Live camera preview");
-  if (cameraPreviewFrameEl) {
-    cameraPreviewFrameEl.textContent = "";
-    cameraPreviewFrameEl.append(video);
-  }
-  if (cameraPreviewStatusEl) cameraPreviewStatusEl.textContent = "Live";
-  updateCameraPreviewVisibility();
-}
-
-function detachCameraPreview() {
-  cameraPreviewVideo?.remove();
-  cameraPreviewVideo = null;
-  if (cameraPreviewFrameEl) {
-    cameraPreviewFrameEl.textContent = "";
-    const placeholder = document.createElement("p");
-    placeholder.textContent = "Start tracking to show the camera feed.";
-    cameraPreviewFrameEl.append(placeholder);
-  }
-  if (cameraPreviewStatusEl) cameraPreviewStatusEl.textContent = "Waiting";
-  updateCameraPreviewVisibility();
-}
-
-function updateCameraPreviewVisibility() {
-  if (!cameraPreviewEl) return;
-
-  const shouldShow =
-    !isCleanOutputWindow &&
-    Boolean(showCameraPreviewInput?.checked) &&
-    Boolean(cameraPreviewVideo);
-
-  cameraPreviewEl.hidden = !shouldShow;
 }
 
 stopTrackingButton?.addEventListener("click", () => {
@@ -1571,85 +1527,366 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-fileInput?.addEventListener("change", () => {
-  if (tracking) {
-    stopTracking("Tracking stopped because the avatar file changed.");
+function getLibraryStorage() {
+  return window.localStorage;
+}
+
+function setAppMode(mode: "library" | "workspace") {
+  if (!appShellEl) return;
+  appShellEl.classList.toggle("mode-library", mode === "library");
+  appShellEl.classList.toggle("mode-workspace", mode === "workspace");
+}
+
+function renderLibraryGrid() {
+  if (!avatarGridEl || !addAvatarTile) return;
+
+  for (const tile of Array.from(
+    avatarGridEl.querySelectorAll(".avatar-tile"),
+  )) {
+    tile.remove();
   }
 
-  selectedFile = fileInput.files?.[0] ?? null;
-  avatarLoaded = false;
-  avatarHasExpressionVariants = false;
-  clearCleanOutputAvatar();
-  setTrackingButtons();
-  setCleanOutputMode(false);
-
-  if (!selectedFile) {
-    logRenderEvent("file selection cleared");
-    if (fileNameEl) fileNameEl.textContent = "No file selected";
-    setRenderButtonDisabled(true);
-    setStatus(
-      "Choose a .ffsd or renderer-supported avatar data file. Current 128-byte .miic v4 files still need a converter.",
-    );
-    return;
+  const avatars = readLibrary(getLibraryStorage());
+  const fragment = document.createDocumentFragment();
+  for (const avatar of avatars) {
+    fragment.append(createAvatarTile(avatar));
   }
+  avatarGridEl.insertBefore(fragment, addAvatarTile);
+}
 
-  logRenderEvent("file selected", {
-    name: selectedFile.name,
-    size: selectedFile.size,
-    type: selectedFile.type || "(none)",
+function createAvatarTile(avatar: LibraryAvatar) {
+  const tile = document.createElement("div");
+  tile.className = "avatar-tile";
+  tile.dataset.avatarId = avatar.id;
+  tile.setAttribute("role", "button");
+  tile.tabIndex = 0;
+  tile.addEventListener("click", () => {
+    void selectAvatar(avatar.id);
+  });
+  tile.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      void selectAvatar(avatar.id);
+    }
   });
 
-  if (fileNameEl) fileNameEl.textContent = selectedFile.name;
-  setRenderButtonDisabled(false);
-  if (selectedFile.size === 128 && selectedFile.name.toLowerCase().endsWith(".miic")) {
-    setStatus(
-      "This looks like current .miic v4 data. Rendering needs a v4 converter or a .ffsd/Studio export.",
-      "error",
-    );
+  const thumb = document.createElement("div");
+  thumb.className = "avatar-tile__thumb";
+  if (avatar.thumbnailDataUrl) {
+    const img = document.createElement("img");
+    img.src = avatar.thumbnailDataUrl;
+    img.alt = avatar.name;
+    thumb.append(img);
   } else {
-    setStatus("Ready to render the 3D model.");
-  }
-});
-
-renderButton?.addEventListener("click", async () => {
-  if (!selectedFile) {
-    setStatus("Choose an avatar data file first.", "error");
-    return;
+    const placeholder = document.createElement("span");
+    placeholder.className = "avatar-tile__thumb-empty";
+    placeholder.textContent = "No preview";
+    thumb.append(placeholder);
   }
 
-  if (!validateFileExtension(selectedFile)) {
-    setStatus(
-      "Use a .ffsd, .miic, .bin, or .dat file for this import path.",
-      "error",
-    );
-    console.warn("[MiiTuber] rejected file extension before render", {
-      name: selectedFile.name,
+  const name = document.createElement("span");
+  name.className = "avatar-tile__name";
+  name.textContent = avatar.name;
+
+  const menu = document.createElement("div");
+  menu.className = "avatar-tile__menu";
+
+  const renameBtn = document.createElement("button");
+  renameBtn.type = "button";
+  renameBtn.textContent = "Rename";
+  renameBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const next = window.prompt("Rename avatar", avatar.name);
+    if (next === null) return;
+    renameAvatar(getLibraryStorage(), avatar.id, sanitizeName(next));
+    renderLibraryGrid();
+    if (currentAvatarId === avatar.id && workspaceAvatarNameEl) {
+      workspaceAvatarNameEl.textContent = sanitizeName(next);
+    }
+  });
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.textContent = "Delete";
+  deleteBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!window.confirm(`Delete "${avatar.name}"?`)) return;
+    removeAvatar(getLibraryStorage(), avatar.id);
+    if (currentAvatarId === avatar.id) {
+      currentAvatarId = null;
+      if (tracking) stopTracking();
+      stopLipSync();
+      setAppMode("library");
+    }
+    renderLibraryGrid();
+  });
+
+  menu.append(renameBtn, deleteBtn);
+  tile.append(thumb, name, menu);
+  return tile;
+}
+
+function wireLibraryControls() {
+  addAvatarTile?.addEventListener("click", () => openImportModal());
+  importClose?.addEventListener("click", () => closeImportModal());
+  importCancel?.addEventListener("click", () => closeImportModal());
+  importModal?.addEventListener("click", (event) => {
+    if (event.target === importModal) closeImportModal();
+  });
+  importPick?.addEventListener("click", () => fileInput?.click());
+  fileInput?.addEventListener("change", () => void handleImportFile());
+  importNameInput?.addEventListener("input", () => {
+    if (importSaveButton) {
+      importSaveButton.disabled = !pendingImport;
+    }
+  });
+  importSaveButton?.addEventListener("click", () => saveImportedAvatar());
+  backToLibraryButton?.addEventListener("click", () => {
+    if (tracking) stopTracking();
+    stopLipSync();
+    currentAvatarId = null;
+    setAppMode("library");
+    renderLibraryGrid();
+  });
+
+  menuItems.forEach((item, index) => {
+    item.addEventListener("click", () => {
+      const name = item.dataset.menu;
+      const popover = document.querySelector<HTMLElement>(
+        `.menu-popover[data-popover="${name}"]`,
+      );
+      if (!popover) return;
+      const willOpen = popover.hidden;
+      if (willOpen) {
+        if (!popover.dataset.positioned) {
+          const offset = index * 28;
+          popover.style.left = `${110 + offset}px`;
+          popover.style.top = `${70 + offset}px`;
+          popover.dataset.positioned = "true";
+        }
+        popover.hidden = false;
+        bringPopoverToFront(popover);
+        makePopoverDraggable(popover);
+      } else {
+        popover.hidden = true;
+      }
+      item.dataset.open = String(willOpen);
     });
-    return;
+  });
+
+  for (const closeBtn of Array.from(
+    document.querySelectorAll<HTMLButtonElement>(".menu-popover__close[data-close]"),
+  )) {
+    closeBtn.addEventListener("click", () => {
+      const name = closeBtn.dataset.close;
+      const popover = document.querySelector<HTMLElement>(
+        `.menu-popover[data-popover="${name}"]`,
+      );
+      if (popover) popover.hidden = true;
+      const item = menuItems.find((entry) => entry.dataset.menu === name);
+      if (item) item.dataset.open = "false";
+    });
   }
+}
+
+let popoverZIndex = 40;
+
+function bringPopoverToFront(popover: HTMLElement) {
+  popoverZIndex += 1;
+  popover.style.zIndex = String(popoverZIndex);
+}
+
+function makePopoverDraggable(popover: HTMLElement) {
+  if (popover.dataset.draggable === "true") return;
+  popover.dataset.draggable = "true";
+
+  const handle = popover.querySelector<HTMLElement>(".menu-popover__header");
+  if (!handle) return;
+
+  handle.addEventListener("pointerdown", (event) => {
+    if ((event.target as HTMLElement).closest(".menu-popover__close")) return;
+    event.preventDefault();
+    bringPopoverToFront(popover);
+
+    const rect = popover.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
+    handle.setPointerCapture(event.pointerId);
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const maxLeft = window.innerWidth - popover.offsetWidth;
+      const maxTop = window.innerHeight - popover.offsetHeight;
+      const left = Math.min(Math.max(0, moveEvent.clientX - offsetX), maxLeft);
+      const top = Math.min(Math.max(0, moveEvent.clientY - offsetY), maxTop);
+      popover.style.left = `${left}px`;
+      popover.style.top = `${top}px`;
+    };
+
+    const onUp = (upEvent: PointerEvent) => {
+      handle.releasePointerCapture(upEvent.pointerId);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+    };
+
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+  });
+}
+
+function openImportModal() {
+  pendingImport = null;
+  if (importModal) importModal.hidden = false;
+  if (importNameInput) {
+    importNameInput.value = "";
+    importNameInput.disabled = true;
+  }
+  if (importSaveButton) importSaveButton.disabled = true;
+  if (importPreviewEl) {
+    importPreviewEl.replaceChildren();
+    const span = document.createElement("span");
+    span.textContent = "No file selected";
+    importPreviewEl.append(span);
+  }
+  setImportStatus("", "idle");
+  if (fileInput) fileInput.value = "";
+}
+
+function closeImportModal() {
+  if (importModal) importModal.hidden = true;
+  pendingImport = null;
+  if (fileInput) fileInput.value = "";
+}
+
+function setImportStatus(
+  message: string,
+  tone: "idle" | "error" | "success" = "idle",
+) {
+  if (!importStatusEl) return;
+  importStatusEl.textContent = message;
+  importStatusEl.dataset.tone = tone;
+}
+
+async function handleImportFile() {
+  const file = fileInput?.files?.[0];
+  if (!file) return;
+
+  pendingImport = null;
+  if (importSaveButton) importSaveButton.disabled = true;
+  setImportStatus("Validating with the local FFL renderer...");
 
   try {
-    if (tracking) {
-      stopTracking("Tracking stopped while reloading the avatar.");
+    const buffer = await file.arrayBuffer();
+    const bytes = Array.from(new Uint8Array(buffer));
+    let thumbnailDataUrl: string | null = null;
+    try {
+      const pngBytes = await invoke<number[]>("render_mii_png", {
+        miiBytes: bytes,
+      });
+      thumbnailDataUrl = bytesToPngDataUrl(pngBytes);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("[MiiTuber] thumbnail render failed during import", {
+        error,
+        message,
+      });
+      setImportStatus(
+        "Renderer unavailable; saving without a thumbnail. It will generate on first use.",
+        "idle",
+      );
     }
 
-    setRenderButtonDisabled(true);
+    pendingImport = { bytes, thumbnailDataUrl };
+    renderImportPreview(thumbnailDataUrl);
+    const defaultName = file.name.replace(/\.[^.]+$/, "");
+    if (importNameInput) {
+      importNameInput.disabled = false;
+      importNameInput.value = sanitizeName(defaultName);
+    }
+    if (importSaveButton) importSaveButton.disabled = false;
+    if (thumbnailDataUrl) {
+      setImportStatus("Looks good. Name it and save.", "success");
+    }
+  } catch (error) {
+    pendingImport = null;
+    const message = error instanceof Error ? error.message : String(error);
+    setImportStatus(`Could not read file: ${message}`, "error");
+  }
+}
+
+function renderImportPreview(thumbnailDataUrl: string | null) {
+  if (!importPreviewEl) return;
+  importPreviewEl.replaceChildren();
+  if (thumbnailDataUrl) {
+    const img = document.createElement("img");
+    img.src = thumbnailDataUrl;
+    img.alt = "Avatar preview";
+    importPreviewEl.append(img);
+  } else {
+    const span = document.createElement("span");
+    span.textContent = "No thumbnail";
+    importPreviewEl.append(span);
+  }
+}
+
+function saveImportedAvatar() {
+  if (!pendingImport) return;
+
+  try {
+    const name = sanitizeName(importNameInput?.value ?? "");
+    addAvatar(getLibraryStorage(), {
+      name,
+      bytes: pendingImport.bytes,
+      thumbnailDataUrl: pendingImport.thumbnailDataUrl,
+    });
+    closeImportModal();
+    renderLibraryGrid();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setImportStatus(`Could not save avatar: ${message}`, "error");
+  }
+}
+
+function bytesToPngDataUrl(bytes: number[]): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return `data:image/png;base64,${btoa(binary)}`;
+}
+
+async function selectAvatar(id: string) {
+  const avatar = getAvatar(getLibraryStorage(), id);
+  if (!avatar) return;
+
+  if (tracking) stopTracking();
+  currentAvatarId = id;
+  if (workspaceAvatarNameEl) workspaceAvatarNameEl.textContent = avatar.name;
+  setAppMode("workspace");
+  requestAnimationFrame(() => avatarScene.resize());
+  await renderAvatarBytes(avatar.bytes, avatar.name);
+
+  if (!avatar.thumbnailDataUrl) {
+    void backfillThumbnail(id, avatar.bytes);
+  }
+}
+
+async function backfillThumbnail(id: string, bytes: number[]) {
+  try {
+    const pngBytes = await invoke<number[]>("render_mii_png", { miiBytes: bytes });
+    setAvatarThumbnail(getLibraryStorage(), id, bytesToPngDataUrl(pngBytes));
+  } catch (error) {
+    console.warn("[MiiTuber] thumbnail backfill failed", { error });
+  }
+}
+
+async function renderAvatarBytes(miiBytes: number[], name: string) {
+  try {
     void refreshRendererHealth();
     setStatus("Requesting GLB from the local FFL renderer...");
 
-    const fileBuffer = await selectedFile.arrayBuffer();
-    const miiBytes = Array.from(new Uint8Array(fileBuffer));
-    logRenderEvent("invoking render_mii_glb", {
-      name: selectedFile.name,
-      byteLength: miiBytes.length,
-    });
-
     const glbBytes = await invoke<number[]>("render_mii_glb", { miiBytes });
     const loadResult = await avatarScene.loadModelFromGlbBytes(glbBytes);
-    saveCleanOutputAvatar({
-      name: selectedFile.name,
-      bytes: miiBytes,
-    });
+    saveCleanOutputAvatar({ name, bytes: miiBytes });
     setAvatarPose(FFLExpression.Normal, { pitch: 0, yaw: 0, roll: 0 });
 
     if (expressionSelect) {
@@ -1663,7 +1900,7 @@ renderButton?.addEventListener("click", async () => {
     void publishCleanOutputAvatarSnapshot();
 
     logRenderEvent("render_mii_glb succeeded", {
-      name: selectedFile.name,
+      name,
       glbBytes: glbBytes.length,
       ...loadResult,
     });
@@ -1687,17 +1924,10 @@ renderButton?.addEventListener("click", async () => {
     setOutputButtons();
     setCleanOutputMode(false);
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[MiiTuber] render_mii_glb failed", {
-      name: selectedFile.name,
-      size: selectedFile.size,
-      error,
-      message,
-    });
+    console.error("[MiiTuber] render_mii_glb failed", { name, error, message });
     setStatus(message, "error");
-  } finally {
-    setRenderButtonDisabled(false);
   }
-});
+}
 
 window.addEventListener("beforeunload", () => {
   faceTracker.stop();
