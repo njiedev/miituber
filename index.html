@@ -10,41 +10,67 @@
   </head>
 
   <body>
-    <main class="app-shell">
-      <header class="titlebar">
-        <h1>MiiTuber</h1>
-        <span class="renderer-health" id="renderer-health" data-tone="idle">
-          Checking renderer&hellip;
-        </span>
+    <main class="app-shell mode-library">
+      <header class="appbar">
+        <div class="appbar-left">
+          <button id="back-to-library" class="tbtn workspace-only" type="button">
+            &lsaquo; Library
+          </button>
+          <strong class="app-name">MiiTuber</strong>
+          <span class="avatar-name workspace-only" id="workspace-avatar-name"></span>
+        </div>
+
+        <div class="appbar-right">
+          <button id="start-tracking-button" class="tbtn workspace-only" type="button" disabled>
+            Start Tracking
+          </button>
+          <button id="stop-tracking-button" class="tbtn workspace-only" type="button" disabled>
+            Stop Tracking
+          </button>
+          <span class="renderer-health" id="renderer-health" data-tone="idle">
+            Checking renderer&hellip;
+          </span>
+        </div>
       </header>
 
-      <div class="toolbar" role="toolbar" aria-label="Primary actions">
-        <label class="tbtn" for="mii-file">Import&hellip;</label>
-        <button id="render-button" class="tbtn" type="button" disabled>Render</button>
-        <span class="tbar-sep" aria-hidden="true"></span>
-        <button id="start-tracking-button" class="tbtn" type="button" disabled>
-          Start Tracking
-        </button>
-        <button id="stop-tracking-button" class="tbtn" type="button" disabled>
-          Stop Tracking
-        </button>
-      </div>
-      <input id="mii-file" type="file" accept=".ffsd,.miic,.bin,.dat" />
+      <div class="content">
+        <!-- Start screen: avatar library -->
+        <section class="library-screen" id="library-screen" aria-label="Avatar library">
+          <div class="library-grid" id="avatar-grid">
+            <button class="add-avatar-tile" id="add-avatar-tile" type="button">
+              <span class="add-avatar-plus" aria-hidden="true">+</span>
+              <span>Add Avatar</span>
+            </button>
+          </div>
+        </section>
 
-      <div class="workspace">
-        <section class="controls" aria-label="Controls">
-          <fieldset class="group">
-            <legend>Avatar</legend>
-            <div class="field">
-              <span class="field-label">File</span>
-              <strong id="file-name">No file selected</strong>
-              <span class="hint">.ffsd, CharInfo, Studio, or legacy .miic</span>
+        <!-- Workspace: centered avatar + overlay controls -->
+        <section class="workspace" aria-label="Avatar workspace">
+          <nav class="side-rail" aria-label="Controls">
+            <button class="rail-item" type="button" data-menu="scene">Scene</button>
+            <button class="rail-item" type="button" data-menu="camera">Camera</button>
+            <button class="rail-item" type="button" data-menu="mic">Microphone</button>
+            <button class="rail-item" type="button" data-menu="output">Output</button>
+            <button class="rail-item" type="button" data-menu="advanced">Advanced</button>
+          </nav>
+
+          <section class="preview-panel" aria-label="Rendered avatar preview">
+            <div class="preview-frame">
+              <canvas id="mii-viewer" aria-label="Rendered Wii-style avatar model"></canvas>
+              <p class="empty-preview">Rendered 3D model appears here.</p>
             </div>
-            <p id="status" data-tone="idle"></p>
-          </fieldset>
+          </section>
 
-          <fieldset class="group">
-            <legend>Scene</legend>
+          <div class="status-toast">
+            <p id="status" data-tone="idle"></p>
+          </div>
+
+          <!-- Scene -->
+          <div class="menu-popover" data-popover="scene" hidden>
+            <div class="menu-popover__header">
+              <h2>Scene</h2>
+              <button class="menu-popover__close" type="button" data-close="scene">&times;</button>
+            </div>
             <label class="field">
               Expression
               <select id="expression-select" disabled>
@@ -63,10 +89,14 @@
               <input id="debug-materials" type="checkbox" />
               Debug geometry colors
             </label>
-          </fieldset>
+          </div>
 
-          <fieldset class="group">
-            <legend>Camera</legend>
+          <!-- Camera -->
+          <div class="menu-popover" data-popover="camera" hidden>
+            <div class="menu-popover__header">
+              <h2>Camera</h2>
+              <button class="menu-popover__close" type="button" data-close="camera">&times;</button>
+            </div>
             <label class="field">
               Device
               <select id="camera-select" disabled>
@@ -81,16 +111,16 @@
                 <option value="60" selected>60</option>
               </select>
             </label>
-            <label class="check">
-              <input id="show-camera-preview" type="checkbox" checked />
-              Show camera preview
-            </label>
-            <p id="tracking-status" data-tone="idle">Render an avatar to enable tracking.</p>
+            <p id="tracking-status" data-tone="idle">Start tracking when you are ready.</p>
             <p class="privacy-note">Camera and microphone stay on your device.</p>
-          </fieldset>
+          </div>
 
-          <fieldset class="group">
-            <legend>Microphone lip-sync</legend>
+          <!-- Microphone -->
+          <div class="menu-popover" data-popover="mic" hidden>
+            <div class="menu-popover__header">
+              <h2>Microphone lip-sync</h2>
+              <button class="menu-popover__close" type="button" data-close="mic">&times;</button>
+            </div>
             <label class="field">
               Device
               <select id="microphone-select">
@@ -121,20 +151,30 @@
                 <dd id="debug-lip-sync-mouth">0.00</dd>
               </div>
             </dl>
-          </fieldset>
+          </div>
 
-          <fieldset class="group">
-            <legend>Output</legend>
+          <!-- Output -->
+          <div class="menu-popover" data-popover="output" hidden>
+            <div class="menu-popover__header">
+              <h2>Output</h2>
+              <button class="menu-popover__close" type="button" data-close="output">&times;</button>
+            </div>
             <div class="btn-row">
               <button id="toggle-clean-output-button" class="btn" type="button" disabled>
                 Open OBS Clean View
               </button>
             </div>
-            <p id="output-status" data-tone="idle">Capture the clean view as a Window source in OBS.</p>
-          </fieldset>
+            <p id="output-status" data-tone="idle">
+              Capture the clean view as a Window source in OBS.
+            </p>
+          </div>
 
-          <details class="debug-panel">
-            <summary>Advanced tuning &amp; debug</summary>
+          <!-- Advanced tuning & debug -->
+          <div class="menu-popover menu-popover--wide" data-popover="advanced" hidden>
+            <div class="menu-popover__header">
+              <h2>Advanced tuning &amp; debug</h2>
+              <button class="menu-popover__close" type="button" data-close="advanced">&times;</button>
+            </div>
             <dl class="tracking-debug" aria-label="Tracking debug values">
               <div>
                 <dt>Expression</dt>
@@ -238,24 +278,35 @@
                 Start tracking to inspect raw vs smoothed MediaPipe face sliders.
               </div>
             </div>
-          </details>
+          </div>
         </section>
+      </div>
 
-        <section class="preview-panel" aria-label="Rendered avatar preview">
-          <div class="preview-frame">
-            <canvas id="mii-viewer" aria-label="Rendered Wii-style avatar model"></canvas>
-            <p class="empty-preview">Rendered 3D model appears here.</p>
+      <!-- Import popup -->
+      <div class="modal-scrim" id="import-modal" hidden>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
+          <div class="modal__header">
+            <h2 id="import-title">Add Avatar</h2>
+            <button class="modal__close" id="import-close" type="button">&times;</button>
           </div>
-          <div id="camera-preview" class="camera-preview" hidden>
-            <div class="camera-preview__header">
-              <h2>Camera</h2>
-              <span id="camera-preview-status">Waiting</span>
+          <div class="modal__body">
+            <div class="import-preview" id="import-preview">
+              <span>No file selected</span>
             </div>
-            <div id="camera-preview-frame" class="camera-preview__frame">
-              <p>Start tracking to show the camera feed.</p>
-            </div>
+            <button class="btn" id="import-pick" type="button">Choose file&hellip;</button>
+            <input id="mii-file" type="file" accept=".ffsd,.miic,.bin,.dat" />
+            <span class="hint">.ffsd, CharInfo, Studio, or legacy .miic</span>
+            <label class="field">
+              Name
+              <input id="import-name" type="text" placeholder="Avatar name" disabled />
+            </label>
+            <p id="import-status" data-tone="idle"></p>
           </div>
-        </section>
+          <div class="modal__footer">
+            <button class="btn btn--primary" id="import-save" type="button" disabled>Save Avatar</button>
+            <button class="btn" id="import-cancel" type="button">Cancel</button>
+          </div>
+        </div>
       </div>
     </main>
   </body>
