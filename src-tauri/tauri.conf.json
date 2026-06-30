@@ -15,8 +15,14 @@
       {
         "label": "main",
         "title": "miituber",
-        "width": 800,
-        "height": 600,
+        "width": 1024,
+        "height": 720,
+        "minWidth": 1024,
+        "minHeight": 720,
+        "maxWidth": 1024,
+        "maxHeight": 720,
+        "resizable": false,
+        "maximizable": false,
         "transparent": true,
         "backgroundThrottling": "disabled"
       },

@@ -11,91 +11,130 @@
 
   <body>
     <main class="app-shell">
-      <section class="import-panel" aria-labelledby="app-title">
-        <div>
-          <p class="eyebrow">Phase 4 prototype</p>
-          <h1 id="app-title">Animate a Wii-style avatar</h1>
-          <p class="lede">
-            Import a local .ffsd, render the 3D head through the local FFL
-            server, then start webcam tracking and capture it in OBS through the
-            clean view window.
-          </p>
-        </div>
+      <header class="titlebar">
+        <h1>MiiTuber</h1>
+        <span class="renderer-health" id="renderer-health" data-tone="idle">
+          Checking renderer&hellip;
+        </span>
+      </header>
 
-        <div class="renderer-health" id="renderer-health" data-tone="idle">
-          Checking renderer on port 5000...
-        </div>
+      <div class="toolbar" role="toolbar" aria-label="Primary actions">
+        <label class="tbtn" for="mii-file">Import&hellip;</label>
+        <button id="render-button" class="tbtn" type="button" disabled>Render</button>
+        <span class="tbar-sep" aria-hidden="true"></span>
+        <button id="start-tracking-button" class="tbtn" type="button" disabled>
+          Start Tracking
+        </button>
+        <button id="stop-tracking-button" class="tbtn" type="button" disabled>
+          Stop Tracking
+        </button>
+      </div>
+      <input id="mii-file" type="file" accept=".ffsd,.miic,.bin,.dat" />
 
-        <label class="file-picker" for="mii-file">
-          <span>Select .ffsd, CharInfo, Studio, or legacy .miic file</span>
-          <strong id="file-name">No file selected</strong>
-        </label>
-        <input id="mii-file" type="file" accept=".ffsd,.miic,.bin,.dat" />
+      <div class="workspace">
+        <section class="controls" aria-label="Controls">
+          <fieldset class="group">
+            <legend>Avatar</legend>
+            <div class="field">
+              <span class="field-label">File</span>
+              <strong id="file-name">No file selected</strong>
+              <span class="hint">.ffsd, CharInfo, Studio, or legacy .miic</span>
+            </div>
+            <p id="status" data-tone="idle"></p>
+          </fieldset>
 
-        <div class="action-row">
-          <button id="render-button" type="button" disabled>Render 3D Model</button>
-        </div>
+          <fieldset class="group">
+            <legend>Scene</legend>
+            <label class="field">
+              Expression
+              <select id="expression-select" disabled>
+                <option value="0">0 Normal</option>
+              </select>
+            </label>
+            <label class="field">
+              Background color
+              <input id="background-color" type="color" value="#e8f0f7" />
+            </label>
+            <label class="check">
+              <input id="transparent-background" type="checkbox" />
+              Transparent background
+            </label>
+            <label class="check">
+              <input id="debug-materials" type="checkbox" />
+              Debug geometry colors
+            </label>
+          </fieldset>
 
-        <div class="scene-controls" aria-label="3D render controls">
-          <label>
-            Expression
-            <select id="expression-select" disabled>
-              <option value="0">0 Normal</option>
-            </select>
-          </label>
+          <fieldset class="group">
+            <legend>Camera</legend>
+            <label class="field">
+              Device
+              <select id="camera-select" disabled>
+                <option value="">Default camera</option>
+              </select>
+            </label>
+            <label class="field">
+              Tracking FPS
+              <select id="tracking-fps-select">
+                <option value="24">24</option>
+                <option value="30">30</option>
+                <option value="60" selected>60</option>
+              </select>
+            </label>
+            <label class="check">
+              <input id="show-camera-preview" type="checkbox" checked />
+              Show camera preview
+            </label>
+            <p id="tracking-status" data-tone="idle">Render an avatar to enable tracking.</p>
+            <p class="privacy-note">Camera and microphone stay on your device.</p>
+          </fieldset>
 
-          <label class="checkbox-control">
-            <input id="debug-materials" type="checkbox" />
-            Debug geometry colors
-          </label>
+          <fieldset class="group">
+            <legend>Microphone lip-sync</legend>
+            <label class="field">
+              Device
+              <select id="microphone-select">
+                <option value="">Default microphone</option>
+              </select>
+            </label>
+            <label class="field">
+              Mouth source
+              <select id="mouth-source-select">
+                <option value="max">Mic + camera</option>
+                <option value="mic">Mic only</option>
+                <option value="camera">Camera only</option>
+              </select>
+            </label>
+            <div class="btn-row">
+              <button id="start-lip-sync-button" class="btn" type="button">Start</button>
+              <button id="calibrate-lip-sync-button" class="btn" type="button" disabled>
+                Calibrate Silence
+              </button>
+              <button id="stop-lip-sync-button" class="btn" type="button" disabled>Stop</button>
+            </div>
+            <p id="lip-sync-status" data-tone="idle">
+              Optional. Camera jaw tracking works without it.
+            </p>
+            <dl class="output-debug" aria-label="Lip-sync value">
+              <div>
+                <dt>Mouth</dt>
+                <dd id="debug-lip-sync-mouth">0.00</dd>
+              </div>
+            </dl>
+          </fieldset>
 
-          <label class="checkbox-control">
-            <input id="transparent-background" type="checkbox" />
-            Transparent background
-          </label>
+          <fieldset class="group">
+            <legend>Output</legend>
+            <div class="btn-row">
+              <button id="toggle-clean-output-button" class="btn" type="button" disabled>
+                Open OBS Clean View
+              </button>
+            </div>
+            <p id="output-status" data-tone="idle">Capture the clean view as a Window source in OBS.</p>
+          </fieldset>
 
-          <label>
-            Background color
-            <input id="background-color" type="color" value="#e8f0f7" />
-          </label>
-        </div>
-
-        <div class="tracking-controls" aria-label="Webcam tracking controls">
-          <label>
-            Camera
-            <select id="camera-select" disabled>
-              <option value="">Default camera</option>
-            </select>
-          </label>
-          <label>
-            Tracking FPS
-            <select id="tracking-fps-select">
-              <option value="24">24</option>
-              <option value="30">30</option>
-              <option value="60" selected>60</option>
-            </select>
-          </label>
-          <label class="checkbox-control">
-            <input id="show-camera-preview" type="checkbox" checked />
-            Show camera preview
-          </label>
-          <div class="action-row">
-            <button id="start-tracking-button" type="button" disabled>
-              Start Tracking
-            </button>
-            <button id="stop-tracking-button" type="button" disabled>
-              Stop Tracking
-            </button>
-          </div>
-          <p id="tracking-status" data-tone="idle">
-            Render an avatar before starting webcam tracking.
-          </p>
-          <p class="privacy-note">
-            Webcam frames stay local in the webview. The demo preview is optional;
-            frames are not recorded or sent to the FFL renderer.
-          </p>
           <details class="debug-panel">
-            <summary>Debug tracking data</summary>
+            <summary>Advanced tuning &amp; debug</summary>
             <dl class="tracking-debug" aria-label="Tracking debug values">
               <div>
                 <dt>Expression</dt>
@@ -155,8 +194,8 @@
                 Calibration stores your neutral face baseline in the profile.
               </p>
               <p class="tuning-note">
-                Mouth enter/exit controls tune both camera jaw and mic lip-sync
-                hysteresis; Min hold ms controls expression switch hold time.
+                Mouth enter/exit tunes camera jaw and mic lip-sync hysteresis. Min hold ms
+                controls expression switch hold time.
               </p>
               <div class="filter-controls">
                 <label>
@@ -200,73 +239,24 @@
               </div>
             </div>
           </details>
-        </div>
-        <div class="output-controls" aria-label="OBS output controls">
-          <div class="action-row">
-            <button id="toggle-clean-output-button" type="button" disabled>
-              Open OBS Clean View
-            </button>
-          </div>
-          <p id="output-status" data-tone="idle">
-            Render an avatar, then open the OBS Clean View to capture it as a
-            transparent Window Capture source in OBS.
-          </p>
-        </div>
-        <div class="lip-sync-controls" aria-label="Audio lip-sync controls">
-          <label>
-            Microphone
-            <select id="microphone-select">
-              <option value="">Default microphone</option>
-            </select>
-          </label>
-          <label>
-            Mouth source
-            <select id="mouth-source-select">
-              <option value="max">Mic + camera</option>
-              <option value="mic">Mic only</option>
-              <option value="camera">Camera only</option>
-            </select>
-          </label>
-          <div class="action-row">
-            <button id="start-lip-sync-button" type="button">Start Mic Lip-Sync</button>
-            <button id="calibrate-lip-sync-button" type="button" disabled>
-              Calibrate Silence
-            </button>
-            <button id="stop-lip-sync-button" type="button" disabled>
-              Stop Mic Lip-Sync
-            </button>
-          </div>
-          <p id="lip-sync-status" data-tone="idle">
-            Mic lip-sync is optional. Camera jaw tracking is still available.
-          </p>
-          <dl class="output-debug" aria-label="Lip-sync debug values">
-            <div>
-              <dt>Mouth</dt>
-              <dd id="debug-lip-sync-mouth">0.00</dd>
-            </div>
-          </dl>
-        </div>
-        <p id="status" data-tone="idle">
-          Choose a .ffsd file to render before starting tracking. Current
-          128-byte .miic v4 files still need a converter.
-        </p>
-      </section>
+        </section>
 
-      <section class="preview-panel" aria-label="Rendered avatar preview">
-        <div class="preview-frame">
-          <canvas id="mii-viewer" aria-label="Rendered Wii-style avatar model"></canvas>
-          <p class="empty-preview">Rendered 3D model appears here.</p>
-        </div>
-        <div id="camera-preview" class="camera-preview" hidden>
-          <div class="camera-preview__header">
-            <h2>Camera</h2>
-            <span id="camera-preview-status">Waiting</span>
+        <section class="preview-panel" aria-label="Rendered avatar preview">
+          <div class="preview-frame">
+            <canvas id="mii-viewer" aria-label="Rendered Wii-style avatar model"></canvas>
+            <p class="empty-preview">Rendered 3D model appears here.</p>
           </div>
-          <div id="camera-preview-frame" class="camera-preview__frame">
-            <p>Start tracking to show the camera feed.</p>
+          <div id="camera-preview" class="camera-preview" hidden>
+            <div class="camera-preview__header">
+              <h2>Camera</h2>
+              <span id="camera-preview-status">Waiting</span>
+            </div>
+            <div id="camera-preview-frame" class="camera-preview__frame">
+              <p>Start tracking to show the camera feed.</p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </main>
   </body>
 </html>
