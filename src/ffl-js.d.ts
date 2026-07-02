@@ -56,6 +56,19 @@ declare module "ffl.js" {
     /** Release GPU/textures and detach from the scene. */
     dispose(disposeTargets?: boolean): void;
   }
+
+  /** Helpers for turning a CharModel's render-target textures into exportable data. */
+  export const ModelTexturesConverter: {
+    /**
+     * Convert every RenderTarget-backed texture in the CharModel's meshes into a
+     * THREE.DataTexture so the model can be serialized (e.g. via GLTFExporter).
+     * Mutates the meshes in place.
+     */
+    convModelTargetsToDataTex(
+      charModel: CharModel,
+      renderer: THREE.WebGLRenderer,
+    ): Promise<void>;
+  };
 }
 
 declare module "ffl.js/ffl-emscripten.cjs" {
