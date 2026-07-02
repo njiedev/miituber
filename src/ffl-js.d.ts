@@ -19,8 +19,25 @@ declare module "ffl.js" {
     ): Promise<FFLContext>;
   };
 
+  /** Describes how a CharModel is built (resolution, enabled expressions, flags). */
+  export type FFLCharModelDesc = {
+    resolution: number;
+    /** Packed bitfield of enabled expressions; build via makeExpressionFlag. */
+    allExpressionFlag: Uint32Array;
+    modelFlag: number;
+  };
+
   /** Default CharModel description passed to the CharModel constructor. */
-  export const FFLCharModelDescDefault: unknown;
+  export const FFLCharModelDescDefault: FFLCharModelDesc;
+
+  /**
+   * Pack one or more FFLExpression indices into the Uint32Array(3) bitfield
+   * expected by FFLCharModelDesc.allExpressionFlag. Each enabled expression
+   * gets a mask texture baked when the CharModel is constructed.
+   */
+  export function makeExpressionFlag(
+    expressions: number | number[],
+  ): Uint32Array;
 
   export class CharModel {
     constructor(

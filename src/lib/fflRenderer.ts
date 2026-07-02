@@ -64,24 +64,39 @@ export function isInitStarted(): boolean {
  * resolved first. The returned model's `.meshes` should be added to a scene,
  * and `.dispose()` called when replacing it.
  */
+/**
+ * Highest standard face-driven expression (FFLExpression 0..18). These are the
+ * expressions MediaPipe face-tracking maps onto, so they must all be baked so
+ * `setExpression()` never throws ExpressionNotSet at runtime. Stylized extras
+ * (heart eyes, cat, etc.) are enabled separately by the hotkey feature.
+ */
+const MAX_FACE_EXPRESSION = 18;
+
 export async function createCharModel(
   ffl: FFLContext,
   miiBytes: Uint8Array,
   renderer: THREE.WebGLRenderer,
 ): Promise<CharModel> {
-  const [{ CharModel, FFLCharModelDescDefault }, { default: FFLShaderMaterial }] =
-    await Promise.all([
-      import("ffl.js"),
-      import("ffl.js/materials/FFLShaderMaterial.js"),
-    ]);
+  const [
+    { CharModel, FFLCharModelDescDefault, makeExpressionFlag },
+    { default: FFLShaderMaterial },
+  ] = await Promise.all([
+    import("ffl.js"),
+    import("ffl.js/materials/FFLShaderMaterial.js"),
+  ]);
 
-  return new CharModel(
-    ffl,
-    miiBytes,
-    FFLCharModelDescDefault,
-    FFLShaderMaterial,
-    renderer,
+  // Default desc enables only NORMAL (allExpressionFlag [1,0,0]); widen it so
+  // every face-driven expression is baked and switchable live.
+  const faceExpressions = Array.from(
+    { length: MAX_FACE_EXPRESSION + 1 },
+    (_, index) => index,
   );
+  const desc = {
+    ...FFLCharModelDescDefault,
+    allExpressionFlag: makeExpressionFlag(faceExpressions),
+  };
+
+  return new CharModel(ffl, miiBytes, desc, FFLShaderMaterial, renderer);
 }
 
 function normalizeResource(resource: ArrayBuffer | Uint8Array): Uint8Array {
