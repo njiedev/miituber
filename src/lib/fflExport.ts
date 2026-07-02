@@ -1,4 +1,4 @@
-import type * as THREE from "three";
+import * as THREE from "three";
 import type { CharModel } from "ffl.js";
 
 /**
@@ -118,11 +118,63 @@ export async function exportCharModelForNativeOutput(
     }
   }
 
+  // 5. Swap every FFLShaderMaterial for a standard material. GLTFExporter
+  //    silently DROPS any THREE.ShaderMaterial (returns null), which would take
+  //    the mask mesh — its FFLMask name, texture and all — out of the GLB, so
+  //    the native side could never find the face. The texture conversions above
+  //    already baked each mesh's final colour into its map (or left it on the
+  //    material colour), so a plain MeshStandardMaterial reproduces it.
+  prepareMeshesForExport(charModel.meshes);
+
   const glbBuffer = (await new GLTFExporter().parseAsync(charModel.meshes, {
     binary: true,
   })) as ArrayBuffer;
 
   return { glb: new Uint8Array(glbBuffer), maskTextures };
+}
+
+/** Subset of material props we read off an FFLShaderMaterial to rebuild it. */
+type ReadableMaterial = THREE.Material & {
+  map?: THREE.Texture | null;
+  color?: THREE.Color;
+  opacity?: number;
+};
+
+/**
+ * Rebuild one material as a plain MeshStandardMaterial that GLTFExporter can
+ * serialize (it drops THREE.ShaderMaterial outright). Preserves the name (so
+ * FFL_MASK_MATERIAL_NAME survives to the native side), the baked-in texture,
+ * the constant colour, transparency and side.
+ */
+export function toExportableMaterial(source: THREE.Material): THREE.MeshStandardMaterial {
+  const src = source as ReadableMaterial;
+  const material = new THREE.MeshStandardMaterial({
+    name: source.name,
+    map: src.map ?? null,
+    transparent: source.transparent,
+    opacity: src.opacity ?? 1,
+    side: source.side,
+    metalness: 0,
+    roughness: 1,
+  });
+  if (src.color) material.color.copy(src.color);
+  material.alphaTest = source.alphaTest;
+  return material;
+}
+
+/**
+ * Replace every mesh's material(s) under `root` with export-safe standard
+ * materials. Must run before GLTFExporter, which silently returns null for any
+ * ShaderMaterial — dropping the mesh's material, name and texture from the GLB.
+ */
+export function prepareMeshesForExport(root: THREE.Object3D): void {
+  root.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.material) return;
+    mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map(toExportableMaterial)
+      : toExportableMaterial(mesh.material);
+  });
 }
 
 /**
