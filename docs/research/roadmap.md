@@ -20,8 +20,11 @@ Ordered roughly by dependency.
 3. **Expression coverage pass.** Confirm the MediaPipe → `FFLExpression`
    mapping covers every face you want; fill gaps.
 4. **Thumbnails via FFL.js.** Replace `render_mii_png` with an in-webview render.
-5. **Native GL output path still works** with the new renderer (OBS Game
-   Capture + alpha — this is the #1 priority feature, don't regress it).
+5. **Native GL output / OBS Game Capture — PARKED** (see
+   "Parked: Game Capture (native GL)" below). Pulled off the critical path: the
+   Clean View + OBS **Window Capture** path already ships working transparency,
+   so Game Capture is now a separate track, not a blocker. The code lives on
+   branches `ffl-swap-complete` (pushed to origin) and `testing-game-capture`.
 6. **Polish the core loop:** import → pick avatar → track → output. Make each
    step's status/errors clear.
 7. **Settings persistence** — camera/mic choice, tuning profile, last avatar.
@@ -34,6 +37,60 @@ Ordered roughly by dependency.
 
 **Phase 1 done =** a stranger can install it, import a Mii, and stream their
 face as a transparent avatar into OBS, with no server and no internet.
+
+---
+
+## Parked: Game Capture (native GL)
+
+**Status: parked.** Code preserved on branches `ffl-swap-complete` (pushed to
+origin) and `testing-game-capture`. The active slate has Clean View + OBS
+**Window Capture** only — no native GL.
+
+### Goal
+Get **OBS Game Capture + Allow Transparency** working: a native OpenGL window
+(Rust + Win32 + WGL, three-d renderer) whose back buffer carries true per-pixel
+alpha, so OBS Game Capture yields clean transparency at high FPS with no chroma
+key. Game Capture's wins over the working Window Capture path: higher/steadier
+FPS + lower latency (GPU-direct), per-pixel alpha without capturing the window
+title bar, and robustness to occlusion/minimize.
+
+### Problems we ran into
+1. **Fidelity gap — the core blocker.** The native window re-renders an exported
+   GLB with three-d's generic PBR (`PhysicalMaterial`), which does **not**
+   reproduce FFL's shader (`FFLShaderMaterial`). Result vs the WebView preview:
+   surfaces read **flat**, eyebrows render **grey instead of black**, and hair
+   loses its specular **"glow."** Two engines, two shaders → two looks.
+2. **Not a geometry bug.** A per-part `normal_spread` diagnostic confirmed the
+   exported normals are correct (wide spread on every curved part), so the
+   flatness is the shader-model mismatch, not bad geometry or lighting.
+3. **Export pipeline was fragile** (now green + unit-tested in
+   `src/lib/fflExport.test.ts`). Three bugs fixed in sequence: swizzled FFL
+   textures crashed the GPU read; strict glTF parser rejected FFL's interleaved
+   half-float/SNORM attributes; and `GLTFExporter` silently drops any
+   `ShaderMaterial`, taking the mask mesh + its `FFLMask` name out of the GLB.
+4. **Lossy transport.** `strip_custom_vertex_attributes` deletes the `_color`
+   vertex attribute the FFL shader needs (per-vertex specular strength + rim
+   width), and flattening to `MeshStandardMaterial` drops each part's
+   `modulateType` / `modulateMode` / const colors — the data a faithful shader
+   would consume.
+
+### Next steps (to resume)
+- **First, decide if it's even worth it:** measure the current Clean View +
+  Window Capture **FPS/latency** and confirm its transparency looks clean in OBS.
+  If it's good enough, Game Capture may stay parked indefinitely.
+- **Pick the architecture:**
+  - *Path A — port the FFL shader into three-d.* Best fidelity, but deep: stop
+    stripping `_`-attributes, carry `_color` + `tangent` + per-part
+    modulateType/mode/const colors through export + IPC, implement a custom
+    three-d `Material` (port ~150 lines of GLSL: Blinn/aniso specular + rim +
+    modulate switch), and fix the mask sRGB read (grey → black brows). Result:
+    the capture window matches the preview, but it's still a separate window.
+  - *Path B — make the native GL surface the preview itself.* Render the avatar
+    natively and show that as the in-app preview → one renderer, one look, one
+    Game-Capturable window. The true "one window" answer, bigger refactor.
+- **Cheap early win regardless of path:** fix the mask color-space read (black
+  eyebrows) — it's clearly *wrong*, not just stylistically soft, and de-risks
+  the color-management question before touching a shader.
 
 ---
 
