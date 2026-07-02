@@ -1,7 +1,15 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { CharModel, FFLContext } from "ffl.js";
 import type { HeadRotation } from "./types";
+import { FFLExpression } from "./types";
+import { createCharModel } from "./fflRenderer";
+
+/** Count of expressions FFL.js can render on demand (CharModel needs no pre-bake). */
+const FFL_SUPPORTED_EXPRESSION_COUNT = Object.values(FFLExpression).filter(
+  (value): value is FFLExpression => typeof value === "number",
+).length;
 
 type VariantMapping = {
   material: number;
@@ -54,6 +62,7 @@ export class AvatarScene {
   private readonly debugMaterial = new THREE.MeshNormalMaterial();
 
   private currentModel: THREE.Object3D | null = null;
+  private charModel: CharModel | null = null;
   private currentGlbUrl: string | null = null;
   private variantMesh: MeshWithMaterial | null = null;
   private selectedExpression = 0;
@@ -132,8 +141,52 @@ export class AvatarScene {
     };
   }
 
+  /**
+   * Render a Mii directly from its raw bytes via in-process FFL.js, bypassing
+   * the external GLB server. `ensureReady()` (fflRenderer) must have resolved;
+   * pass its `FFLContext` handle in as `ffl`.
+   */
+  async loadModelFromMiiBytes(
+    miiBytes: Uint8Array,
+    ffl: FFLContext,
+  ): Promise<AvatarLoadResult> {
+    this.disposeCurrentModel();
+    this.variantMaterials.clear();
+    this.originalMaterials.clear();
+    this.variantMesh = null;
+    this.selectedExpression = 0;
+
+    const charModel = await createCharModel(ffl, miiBytes, this.renderer);
+    this.charModel = charModel;
+    this.currentModel = charModel.meshes;
+
+    let meshCount = 0;
+    this.currentModel.traverse((child) => {
+      const mesh = child as MeshWithMaterial;
+      if (!mesh.isMesh) return;
+      meshCount += 1;
+      mesh.frustumCulled = false;
+    });
+
+    const framing = this.frameModel(this.currentModel);
+    this.modelRoot.add(this.currentModel);
+    this.setExpression(0);
+
+    return {
+      meshCount,
+      // CharModel renders any expression on demand — no pre-baked variants.
+      expressionCount: FFL_SUPPORTED_EXPRESSION_COUNT,
+      ...framing,
+    };
+  }
+
   setExpression(index: number) {
     this.selectedExpression = index;
+
+    if (this.charModel) {
+      if (!this.debugMaterialsEnabled) this.charModel.setExpression(index);
+      return;
+    }
 
     if (!this.variantMesh || this.debugMaterialsEnabled) return;
 
@@ -267,6 +320,14 @@ export class AvatarScene {
   }
 
   private disposeCurrentModel() {
+    if (this.charModel) {
+      this.modelRoot.remove(this.charModel.meshes);
+      this.charModel.dispose();
+      this.charModel = null;
+      this.currentModel = null;
+      return;
+    }
+
     if (!this.currentModel) return;
 
     this.modelRoot.remove(this.currentModel);

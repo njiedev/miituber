@@ -29,6 +29,17 @@ sha2 = "0.10"
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
+  "Win32_Graphics_OpenGL",
   "Win32_System_LibraryLoader",
   "Win32_UI_WindowsAndMessaging",
+] }
+three-d = { version = "0.18", default-features = false }
+three-d-asset = { version = "0.9", default-features = false, features = [
+  "gltf",
+  "png",
+] }
+gltf = { version = "1.4", default-features = false, features = [
+  "import",
+  "utils",
+  "KHR_materials_variants",
 ] }
