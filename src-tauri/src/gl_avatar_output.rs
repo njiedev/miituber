@@ -350,6 +350,30 @@ unsafe fn render_loop(
         .deserialize("avatar.glb")
         .map_err(|error| format!("failed to parse GLB: {error}"))?;
 
+    // One-shot diagnostic: dump every loaded primitive so rendering problems
+    // (a missing part, absent normals, unexpected albedo) can be diagnosed from
+    // the log instead of guessed at. Runs once per window open.
+    for prim in &cpu_model.geometries {
+        let (verts, has_normals, has_tangents, has_uvs) = match &prim.geometry {
+            three_d_asset::Geometry::Triangles(mesh) => (
+                mesh.positions.len(),
+                mesh.normals.is_some(),
+                mesh.tangents.is_some(),
+                mesh.uvs.is_some(),
+            ),
+            _ => (0, false, false, false),
+        };
+        let material = prim.material_index.and_then(|i| cpu_model.materials.get(i));
+        let mat_name = material.map(|m| m.name.as_str()).unwrap_or("<none>");
+        let albedo = material.map(|m| m.albedo).unwrap_or(Srgba::WHITE);
+        eprintln!(
+            "gl_avatar_output: part '{}' verts={verts} normals={has_normals} \
+             tangents={has_tangents} uvs={has_uvs} material='{mat_name}' \
+             albedo={},{},{},{}",
+            prim.name, albedo.r, albedo.g, albedo.b, albedo.a
+        );
+    }
+
     let mut model = Model::<PhysicalMaterial>::new(context, &cpu_model)
         .map_err(|error| format!("failed to build model: {error}"))?;
 
@@ -387,8 +411,15 @@ unsafe fn render_loop(
         100.0,
     );
 
+    // three-d's PBR adds ambient as intensity*albedo unconditionally, so an
+    // ambient >= 1 (the web preview used 1.35) saturates every surface to full
+    // brightness and drowns out the directional light — the model reads as a
+    // flat silhouette with no visible depth (e.g. the nose bump disappears).
+    // Keep ambient low so the key light actually models form; three.js's
+    // FFLShaderMaterial tolerates the high value the web scene uses, three-d
+    // does not.
     let key_light = DirectionalLight::new(context, 2.4, Srgba::WHITE, vec3(-1.8, -2.5, -2.6));
-    let ambient = AmbientLight::new(context, 1.35, Srgba::WHITE);
+    let ambient = AmbientLight::new(context, 0.35, Srgba::WHITE);
 
     let mut msg: MSG = std::mem::zeroed();
     loop {
