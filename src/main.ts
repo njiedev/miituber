@@ -12,6 +12,34 @@ import {
 import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
 import { LipSyncEnvelope, rootMeanSquare } from "./lib/lipSync";
 import { AvatarScene } from "./lib/scene";
+import { ensureReady, type FFLContext } from "./lib/fflRenderer";
+
+/**
+ * When true, render Miis in-process via FFL.js instead of the external
+ * `127.0.0.1:5000` GLB server. Flip to false to fall back to the Rust/HTTP path.
+ */
+const USE_FFL_JS = true;
+
+// Bundled assets served from Vite's public/ dir.
+// NOTE: shipping should load a user-supplied .dat from disk instead of bundling
+// it (see docs/research/roadmap.md Phase 2 — do not redistribute Nintendo data).
+const FFL_RESOURCE_URL = "/AFLResHigh_2_3.dat";
+const FFL_WASM_URL = "/ffl-emscripten.wasm";
+
+let fflContextPromise: Promise<FFLContext> | null = null;
+
+async function getFflContext(): Promise<FFLContext> {
+  if (!fflContextPromise) {
+    fflContextPromise = (async () => {
+      const resource = await (await fetch(FFL_RESOURCE_URL)).arrayBuffer();
+      return ensureReady({ resource, wasmUrl: FFL_WASM_URL });
+    })().catch((error) => {
+      fflContextPromise = null;
+      throw error;
+    });
+  }
+  return fflContextPromise;
+}
 import {
   FFL_EXPRESSION_LABELS,
   FFLExpression,
@@ -151,6 +179,18 @@ const toggleCleanOutputButton = document.querySelector<HTMLButtonElement>(
   "#toggle-clean-output-button",
 );
 const outputStatusEl = document.querySelector<HTMLElement>("#output-status");
+const glAlphaProbeButton = document.querySelector<HTMLButtonElement>(
+  "#gl-alpha-probe-button",
+);
+const glAlphaProbeStatusEl = document.querySelector<HTMLElement>(
+  "#gl-alpha-probe-status",
+);
+const glAvatarOutputButton = document.querySelector<HTMLButtonElement>(
+  "#gl-avatar-output-button",
+);
+const glAvatarOutputStatusEl = document.querySelector<HTMLElement>(
+  "#gl-avatar-output-status",
+);
 const microphoneSelect =
   document.querySelector<HTMLSelectElement>("#microphone-select");
 const mouthSourceSelect =
@@ -178,6 +218,8 @@ let latestExpressionScores: ExpressionScores = zeroExpressionScores();
 let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
 let cleanOutputMode = false;
 let isolateMode = false;
+let latestGlbBytes: number[] | null = null;
+let glAvatarOutputActive = false;
 let currentCleanOutputAvatar: CleanOutputStoredAvatar | null = null;
 let cleanOutputBackgroundOverride: CleanOutputBackgroundPayload | null = null;
 let cleanOutputAvatarLoaded = false;
@@ -700,6 +742,23 @@ function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
   avatarScene.setExpression(expressionIndex);
   avatarScene.setHeadRotation(headRotation);
   publishCleanOutputPose();
+  publishGlAvatarPose(expressionIndex, headRotation);
+}
+
+function publishGlAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
+  if (!glAvatarOutputActive) return;
+  try {
+    void invoke("set_gl_avatar_pose", {
+      pitch: headRotation.pitch,
+      yaw: headRotation.yaw,
+      roll: headRotation.roll,
+    }).catch(() => {});
+    void invoke("set_gl_avatar_expression", {
+      index: expressionIndex,
+    }).catch(() => {});
+  } catch {
+    // Never let output plumbing break the tracking loop.
+  }
 }
 
 function readCurrentBackground(): CleanOutputBackgroundPayload {
@@ -865,6 +924,48 @@ toggleCleanOutputButton?.addEventListener("click", () => {
 
 isolateCaptureButton?.addEventListener("click", () => {
   setIsolateMode(true);
+});
+
+glAlphaProbeButton?.addEventListener("click", async () => {
+  try {
+    await invoke("open_gl_alpha_probe");
+    if (glAlphaProbeStatusEl) {
+      glAlphaProbeStatusEl.dataset.tone = "ok";
+      glAlphaProbeStatusEl.textContent =
+        "GL alpha probe opened. In OBS: Game Capture \u2192 capture this app \u2192 Allow Transparency.";
+    }
+  } catch (error) {
+    if (glAlphaProbeStatusEl) {
+      glAlphaProbeStatusEl.dataset.tone = "error";
+      glAlphaProbeStatusEl.textContent = `Could not open GL alpha probe: ${String(error)}`;
+    }
+  }
+});
+
+glAvatarOutputButton?.addEventListener("click", async () => {
+  if (!latestGlbBytes) {
+    if (glAvatarOutputStatusEl) {
+      glAvatarOutputStatusEl.dataset.tone = "error";
+      glAvatarOutputStatusEl.textContent =
+        "Render an avatar first, then open the native GL output.";
+    }
+    return;
+  }
+
+  try {
+    await invoke("open_gl_avatar_output", { glbBytes: latestGlbBytes });
+    glAvatarOutputActive = true;
+    if (glAvatarOutputStatusEl) {
+      glAvatarOutputStatusEl.dataset.tone = "ok";
+      glAvatarOutputStatusEl.textContent =
+        "Native GL output opened. In OBS: Game Capture \u2192 capture this app \u2192 Allow Transparency.";
+    }
+  } catch (error) {
+    if (glAvatarOutputStatusEl) {
+      glAvatarOutputStatusEl.dataset.tone = "error";
+      glAvatarOutputStatusEl.textContent = `Could not open native GL output: ${String(error)}`;
+    }
+  }
 });
 
 window.addEventListener("keydown", (event) => {
@@ -1921,11 +2022,22 @@ async function backfillThumbnail(id: string, bytes: number[]) {
 
 async function renderAvatarBytes(miiBytes: number[], name: string) {
   try {
-    void refreshRendererHealth();
-    setStatus("Requesting GLB from the local FFL renderer...");
-
-    const glbBytes = await invoke<number[]>("render_mii_glb", { miiBytes });
-    const loadResult = await avatarScene.loadModelFromGlbBytes(glbBytes);
+    let loadResult;
+    if (USE_FFL_JS) {
+      setStatus("Rendering with in-process FFL.js...");
+      const ffl = await getFflContext();
+      loadResult = await avatarScene.loadModelFromMiiBytes(
+        new Uint8Array(miiBytes),
+        ffl,
+      );
+      latestGlbBytes = null;
+    } else {
+      void refreshRendererHealth();
+      setStatus("Requesting GLB from the local FFL renderer...");
+      const glbBytes = await invoke<number[]>("render_mii_glb", { miiBytes });
+      latestGlbBytes = glbBytes;
+      loadResult = await avatarScene.loadModelFromGlbBytes(glbBytes);
+    }
     saveCleanOutputAvatar({ name, bytes: miiBytes });
     setAvatarPose(FFLExpression.Normal, { pitch: 0, yaw: 0, roll: 0 });
 
@@ -1939,9 +2051,9 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
     setOutputButtons();
     void publishCleanOutputAvatarSnapshot();
 
-    logRenderEvent("render_mii_glb succeeded", {
+    logRenderEvent("avatar render succeeded", {
       name,
-      glbBytes: glbBytes.length,
+      renderer: USE_FFL_JS ? "ffl.js" : "glb-server",
       ...loadResult,
     });
     if (emptyPreviewEl) emptyPreviewEl.hidden = true;

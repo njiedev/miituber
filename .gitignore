@@ -13,6 +13,10 @@ dist-ssr
 src-tauri/target
 *.local
 
+# Nintendo FFL resource file — user-supplied, never redistribute
+AFLResHigh_2_3.dat
+public/AFLResHigh_2_3.dat
+
 # Local render/debug artifacts
 output.png
 bridge/*.bin
