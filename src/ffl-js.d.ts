@@ -60,6 +60,19 @@ declare module "ffl.js" {
   /** Helpers for turning a CharModel's render-target textures into exportable data. */
   export const ModelTexturesConverter: {
     /**
+     * Flatten the CharModel's swizzled modulateMode textures (cap, noseline,
+     * glass — R/RG formats) into plain RGBA render targets, baking in color.
+     * Must run before convModelTargetsToDataTex when the CharModel was built
+     * with an FFL-supporting material (which leaves those textures swizzled),
+     * otherwise convModelTargetsToDataTex hits a non-render-target texture.
+     * Mutates the meshes in place.
+     */
+    convModelTexturesToRGBA(
+      charModel: CharModel,
+      renderer: THREE.WebGLRenderer,
+      materialTextureClass: unknown,
+    ): void;
+    /**
      * Convert every RenderTarget-backed texture in the CharModel's meshes into a
      * THREE.DataTexture so the model can be serialized (e.g. via GLTFExporter).
      * Mutates the meshes in place.

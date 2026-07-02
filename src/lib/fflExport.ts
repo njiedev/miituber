@@ -81,12 +81,26 @@ export async function exportCharModelForNativeOutput(
     material.name = FFL_MASK_MATERIAL_NAME;
   }
 
-  // 3. Convert render-target textures to DataTextures (GLTFExporter can't
-  //    serialize RenderTargets) and export the whole model as glTF-binary.
-  const [{ ModelTexturesConverter }, { GLTFExporter }] = await Promise.all([
+  // 3. Convert every texture to plain data so GLTFExporter can serialize it.
+  //    Built with FFLShaderMaterial, the cap/noseline/glass meshes still carry
+  //    swizzled (R/RG) modulateMode textures with no backing render target, so
+  //    convModelTargetsToDataTex would choke on them. convModelTexturesToRGBA
+  //    first flattens those into RGBA render targets; then every textured mesh
+  //    is a render target and can be turned into a DataTexture. Export as GLB.
+  const [
+    { ModelTexturesConverter },
+    { default: FFLShaderMaterial },
+    { GLTFExporter },
+  ] = await Promise.all([
     import("ffl.js"),
+    import("ffl.js/materials/FFLShaderMaterial.js"),
     import("three/examples/jsm/exporters/GLTFExporter.js"),
   ]);
+  ModelTexturesConverter.convModelTexturesToRGBA(
+    charModel,
+    renderer,
+    FFLShaderMaterial,
+  );
   await ModelTexturesConverter.convModelTargetsToDataTex(charModel, renderer);
 
   const glbBuffer = (await new GLTFExporter().parseAsync(charModel.meshes, {
