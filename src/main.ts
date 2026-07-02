@@ -946,8 +946,9 @@ glAvatarOutputButton?.addEventListener("click", async () => {
   if (!latestGlbBytes) {
     if (glAvatarOutputStatusEl) {
       glAvatarOutputStatusEl.dataset.tone = "error";
-      glAvatarOutputStatusEl.textContent =
-        "Render an avatar first, then open the native GL output.";
+      glAvatarOutputStatusEl.textContent = avatarLoaded
+        ? "Native GL output needs the local FFL renderer running to build its GLB. Start it, then re-select the avatar."
+        : "Render an avatar first, then open the native GL output.";
     }
     return;
   }
@@ -2020,6 +2021,25 @@ async function backfillThumbnail(id: string, bytes: number[]) {
   }
 }
 
+/**
+ * Best-effort GLB fetch for the native GL OBS output window, which still needs
+ * the FFL-server GLB (baked expression variants). Non-fatal: if the local
+ * renderer is not running, return null and let the output button explain.
+ */
+async function tryFetchNativeOutputGlb(
+  miiBytes: number[],
+): Promise<number[] | null> {
+  try {
+    return await invoke<number[]>("render_mii_glb", { miiBytes });
+  } catch (error) {
+    console.warn(
+      "[MiiTuber] native GL output GLB unavailable (local FFL renderer offline)",
+      { error },
+    );
+    return null;
+  }
+}
+
 async function renderAvatarBytes(miiBytes: number[], name: string) {
   try {
     let loadResult;
@@ -2030,7 +2050,12 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
         new Uint8Array(miiBytes),
         ffl,
       );
-      latestGlbBytes = null;
+      // Native GL OBS output (roadmap #5) still consumes an FFL-server-style
+      // GLB whose baked expression variants the in-webview CharModel does not
+      // yet emit. Until that path is ported to FFL.js, best-effort fetch the GLB
+      // from the retained local renderer so native output stays usable when it
+      // is running; the webview preview + thumbnails remain fully offline.
+      latestGlbBytes = await tryFetchNativeOutputGlb(miiBytes);
     } else {
       void refreshRendererHealth();
       setStatus("Requesting GLB from the local FFL renderer...");
