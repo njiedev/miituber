@@ -5,22 +5,17 @@ Notable changes to MiiTuber. This is a prototype (`0.1.0`), so entries are group
 ## Unreleased
 
 ### Added
-- **Native OpenGL avatar output for OBS** (`src-tauri/src/gl_avatar_output.rs`): renders the avatar GLB in a native Win32 + GL window whose back buffer carries a real alpha channel, so OBS Game Capture + Allow Transparency yields true per-pixel transparency at full FPS. The render is the output — no per-frame pixel copies.
-- **Native GL alpha probe** (`src-tauri/src/gl_alpha_probe.rs`): a minimal transparency test that validated the Game Capture alpha path.
-- **Live head tracking into the native output**: `set_gl_avatar_pose` command pushes pitch/yaw/roll lock-free each frame; the render loop rebuilds the model transform per frame.
-- **Live expression / variant sync in the native output** (`set_gl_avatar_expression` command): the tracked expression index is pushed lock-free each frame and swaps the face material. three-d's `Model` drops materials no primitive references, so the native renderer rebuilds the 19 `Material_XluMask_<expr>` face materials from the `CpuModel` itself (keyed by the name suffix, which matches the `KHR_materials_variants` `Expression_<n>` index) and swaps the face part's material on change.
 - **Transparent clean-capture isolate mode** for OBS.
 - **Avatar library start screen** with draggable control panels.
 
 ### Changed
 - Redesigned the UI into a fixed-size, WinRAR-style utility shell.
-- FFL GLB loading in the native renderer: strips the custom `_COLOR` vertex attribute (rejected by the Rust `gltf` validator), forces materials diffuse (FFL omits `metallicFactor`, which would render near-black), and enables the `png` feature on `three-d-asset`.
+
+### Removed
+- **Native OpenGL avatar output + GL alpha probe (parked).** The native Win32 + GL renderer (`gl_avatar_output.rs`, `gl_alpha_probe.rs`), its Tauri commands (`open_gl_avatar_output`, `open_gl_alpha_probe`, `set_gl_avatar_pose`, `set_gl_avatar_expression`), the frontend export path (`src/lib/fflExport.ts`), and the `three-d`/`three-d-asset`/`gltf`/`windows-sys` dependencies were removed from the active build. The path is **parked, not abandoned** — it hit a fidelity blocker (three-d's generic PBR can't reproduce FFL's shader: flat surfaces, grey eyebrows, no hair glow). Goal, root cause, and resume plan are in `docs/research/roadmap.md`; the code is preserved on the `ffl-swap-complete` and `testing-game-capture` branches. The active OBS output is Clean View + Window Capture.
 
 ### Docs
 - Consolidated scattered planning/process markdown (context, decisions, debug ledger, phase PRDs, agent-bridge notes) into `docs/`: `README`, `ARCHITECTURE`, `AGENTS`, `DESIGN`, `CHANGELOG`. Historical decision records and the transparency-attempt ledger were distilled into `ARCHITECTURE.md` and `AGENTS.md` (hard constraints + rejected approaches).
-
-### Pending
-- Checkerboard/preview background parity and shading/colour-fidelity match to the web preview in the native output (deferred: functional before polish).
 
 ## Phase history
 

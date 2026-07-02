@@ -4,11 +4,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-#[cfg(windows)]
-mod gl_alpha_probe;
-#[cfg(windows)]
-mod gl_avatar_output;
-
 const FFL_STORE_DATA_LEN: usize = 96;
 const SWITCH_CHAR_INFO_LEN: usize = 88;
 const STUDIO_RAW_LEN: usize = 46;
@@ -201,62 +196,6 @@ async fn render_mii_glb(
         .insert(cache_key, glb_bytes.clone());
 
     Ok(glb_bytes)
-}
-
-#[tauri::command]
-fn open_gl_alpha_probe() -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        gl_alpha_probe::open();
-        Ok(())
-    }
-
-    #[cfg(not(windows))]
-    {
-        Err("The OpenGL alpha probe is only available on Windows.".to_string())
-    }
-}
-
-#[tauri::command]
-fn open_gl_avatar_output(request: tauri::ipc::Request<'_>) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        let payload = match request.body() {
-            tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),
-            _ => {
-                return Err("Expected a raw binary payload for the native output window.".to_string())
-            }
-        };
-        gl_avatar_output::open_from_payload(payload)
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = request;
-        Err("The native GL avatar output is only available on Windows.".to_string())
-    }
-}
-
-#[tauri::command]
-fn set_gl_avatar_pose(pitch: f32, yaw: f32, roll: f32) {
-    #[cfg(windows)]
-    gl_avatar_output::set_pose(pitch, yaw, roll);
-
-    #[cfg(not(windows))]
-    {
-        let _ = (pitch, yaw, roll);
-    }
-}
-
-#[tauri::command]
-fn set_gl_avatar_expression(index: u32) {
-    #[cfg(windows)]
-    gl_avatar_output::set_expression(index);
-
-    #[cfg(not(windows))]
-    {
-        let _ = index;
-    }
 }
 
 #[tauri::command]
@@ -516,10 +455,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             check_renderer_status,
-            open_gl_alpha_probe,
-            open_gl_avatar_output,
-            set_gl_avatar_pose,
-            set_gl_avatar_expression,
             render_mii_glb,
             render_mii_png
         ])

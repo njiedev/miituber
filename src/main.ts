@@ -13,7 +13,6 @@ import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
 import { LipSyncEnvelope, rootMeanSquare } from "./lib/lipSync";
 import { AvatarScene } from "./lib/scene";
 import { ensureReady, type FFLContext } from "./lib/fflRenderer";
-import { packNativeOutputPayload } from "./lib/fflExport";
 
 /**
  * When true, render Miis in-process via FFL.js instead of the external
@@ -180,18 +179,6 @@ const toggleCleanOutputButton = document.querySelector<HTMLButtonElement>(
   "#toggle-clean-output-button",
 );
 const outputStatusEl = document.querySelector<HTMLElement>("#output-status");
-const glAlphaProbeButton = document.querySelector<HTMLButtonElement>(
-  "#gl-alpha-probe-button",
-);
-const glAlphaProbeStatusEl = document.querySelector<HTMLElement>(
-  "#gl-alpha-probe-status",
-);
-const glAvatarOutputButton = document.querySelector<HTMLButtonElement>(
-  "#gl-avatar-output-button",
-);
-const glAvatarOutputStatusEl = document.querySelector<HTMLElement>(
-  "#gl-avatar-output-status",
-);
 const microphoneSelect =
   document.querySelector<HTMLSelectElement>("#microphone-select");
 const mouthSourceSelect =
@@ -219,8 +206,6 @@ let latestExpressionScores: ExpressionScores = zeroExpressionScores();
 let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
 let cleanOutputMode = false;
 let isolateMode = false;
-let latestGlbBytes: number[] | null = null;
-let glAvatarOutputActive = false;
 let currentCleanOutputAvatar: CleanOutputStoredAvatar | null = null;
 let cleanOutputBackgroundOverride: CleanOutputBackgroundPayload | null = null;
 let cleanOutputAvatarLoaded = false;
@@ -743,23 +728,6 @@ function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
   avatarScene.setExpression(expressionIndex);
   avatarScene.setHeadRotation(headRotation);
   publishCleanOutputPose();
-  publishGlAvatarPose(expressionIndex, headRotation);
-}
-
-function publishGlAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
-  if (!glAvatarOutputActive) return;
-  try {
-    void invoke("set_gl_avatar_pose", {
-      pitch: headRotation.pitch,
-      yaw: headRotation.yaw,
-      roll: headRotation.roll,
-    }).catch(() => {});
-    void invoke("set_gl_avatar_expression", {
-      index: expressionIndex,
-    }).catch(() => {});
-  } catch {
-    // Never let output plumbing break the tracking loop.
-  }
 }
 
 function readCurrentBackground(): CleanOutputBackgroundPayload {
@@ -925,76 +893,6 @@ toggleCleanOutputButton?.addEventListener("click", () => {
 
 isolateCaptureButton?.addEventListener("click", () => {
   setIsolateMode(true);
-});
-
-glAlphaProbeButton?.addEventListener("click", async () => {
-  try {
-    await invoke("open_gl_alpha_probe");
-    if (glAlphaProbeStatusEl) {
-      glAlphaProbeStatusEl.dataset.tone = "ok";
-      glAlphaProbeStatusEl.textContent =
-        "GL alpha probe opened. In OBS: Game Capture \u2192 capture this app \u2192 Allow Transparency.";
-    }
-  } catch (error) {
-    if (glAlphaProbeStatusEl) {
-      glAlphaProbeStatusEl.dataset.tone = "error";
-      glAlphaProbeStatusEl.textContent = `Could not open GL alpha probe: ${String(error)}`;
-    }
-  }
-});
-
-glAvatarOutputButton?.addEventListener("click", async () => {
-  if (!avatarLoaded) {
-    if (glAvatarOutputStatusEl) {
-      glAvatarOutputStatusEl.dataset.tone = "error";
-      glAvatarOutputStatusEl.textContent =
-        "Render an avatar first, then open the native GL output.";
-    }
-    return;
-  }
-
-  try {
-    // Build the native-output payload. Under FFL.js, export the avatar (static
-    // GLB + 19 mask textures) lazily now; otherwise reuse the server GLB with no
-    // masks (the native side then falls back to its baked-material path).
-    let payload: ArrayBuffer;
-    if (USE_FFL_JS) {
-      if (!currentCleanOutputAvatar) {
-        throw new Error("No avatar is loaded to export.");
-      }
-      if (glAvatarOutputStatusEl) {
-        glAvatarOutputStatusEl.dataset.tone = "info";
-        glAvatarOutputStatusEl.textContent = "Exporting avatar for native output...";
-      }
-      const ffl = await getFflContext();
-      const exported = await avatarScene.exportForNativeOutput(
-        new Uint8Array(currentCleanOutputAvatar.bytes),
-        ffl,
-      );
-      payload = packNativeOutputPayload(exported);
-    } else {
-      if (!latestGlbBytes) {
-        throw new Error("No GLB is available for the native output.");
-      }
-      payload = packNativeOutputPayload({
-        glb: new Uint8Array(latestGlbBytes),
-        maskTextures: [],
-      });
-    }
-
-    await invoke("open_gl_avatar_output", payload);
-    glAvatarOutputActive = true;
-    if (glAvatarOutputStatusEl) {
-      glAvatarOutputStatusEl.dataset.tone = "ok";
-      glAvatarOutputStatusEl.textContent =
-        "Native GL output opened. In OBS: Game Capture \u2192 capture this app \u2192 Allow Transparency.";
-    }
-  } catch (error) {
-    if (glAvatarOutputStatusEl) {
-      glAvatarOutputStatusEl.dataset.tone = "error";
-      glAvatarOutputStatusEl.textContent = `Could not open native GL output: ${String(error)}`;
-    }
-  }
 });
 
 window.addEventListener("keydown", (event) => {
@@ -2059,14 +1957,10 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
         new Uint8Array(miiBytes),
         ffl,
       );
-      // Native GL OBS output is produced lazily on button-click by exporting the
-      // CharModel (GLB + mask textures), so there is nothing to prefetch here.
-      latestGlbBytes = null;
     } else {
       void refreshRendererHealth();
       setStatus("Requesting GLB from the local FFL renderer...");
       const glbBytes = await invoke<number[]>("render_mii_glb", { miiBytes });
-      latestGlbBytes = glbBytes;
       loadResult = await avatarScene.loadModelFromGlbBytes(glbBytes);
     }
     saveCleanOutputAvatar({ name, bytes: miiBytes });
