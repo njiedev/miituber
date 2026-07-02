@@ -37,9 +37,7 @@ miituber/
 ├── src-tauri/              Backend (Rust)
 │   └── src/
 │       ├── lib.rs              Tauri commands: renderer status, GLB/PNG render,
-│       │                       input normalization, caching, native-output cmds
-│       ├── gl_avatar_output.rs Native Win32+GL avatar renderer window (OBS output)
-│       ├── gl_alpha_probe.rs   Native GL alpha/transparency test probe
+│       │                       input normalization, caching
 │       └── main.rs             Binary entry
 ├── scripts/verify-renderer-glb.mjs   GLB variant verification tool
 ├── mee.ffsd                Known-good sample avatar
@@ -61,21 +59,11 @@ The **Rust backend is the boundary** between the app and the local renderer. Fro
 
 ## Output paths (OBS)
 
-The active direction is a **native OpenGL window** rendered by Rust that OBS captures via **Game Capture + Allow Transparency** for true per-pixel alpha (VCFace-style: the window looks opaque to the eye but its back buffer carries a real alpha channel).
+The active output is the **transparent Clean View webview + OBS Window Capture**: a separate WebView2 window renders the avatar on a transparent/keyable background that OBS captures as a Window source.
 
-- `gl_avatar_output.rs` renders the avatar GLB in a native GL window; the render **is** the output — no per-frame pixel readback/IPC/GDI copies.
-- Head pose is pushed lock-free from the frontend via the `set_gl_avatar_pose` command each frame.
-- `gl_alpha_probe.rs` is a minimal transparency test used to validate the Game Capture alpha path.
+The **native OpenGL / OBS Game Capture** path (a Rust-rendered GL window carrying true per-pixel alpha) is **parked** — see the "Parked: Game Capture (native GL)" section in [research/roadmap.md](research/roadmap.md) for the goal, the fidelity blocker, and how to resume. The parked code is preserved on the `ffl-swap-complete` and `testing-game-capture` branches.
 
-The earlier **transparent Clean View webview + OBS Window Capture** remains a fallback. See [AGENTS.md](AGENTS.md) for the hard constraints and rejected approaches around output/transparency, and [CHANGELOG.md](CHANGELOG.md) for how the output architecture evolved.
-
-## FFL GLB quirks (important when touching the native renderer)
-
-The FFL renderer GLB has traits that the strict Rust `gltf` crate handles differently than three.js:
-
-- **Custom `_COLOR` vertex attribute** (FFL per-vertex modulate color) — rejected by the Rust `gltf` validator as an invalid semantic. Stripped from the GLB JSON before loading.
-- **Materials omit `metallicFactor`/`roughnessFactor`** — glTF defaults them to fully metallic, which renders near-black without an environment map. The native renderer forces materials diffuse.
-- Embedded images are **PNG** — three-d-asset needs its `png` feature enabled.
+See [AGENTS.md](AGENTS.md) for the hard constraints around output/transparency, and [CHANGELOG.md](CHANGELOG.md) for how the output architecture evolved.
 
 ## Searchable entry points
 
@@ -83,4 +71,3 @@ The FFL renderer GLB has traits that the strict Rust `gltf` crate handles differ
 - Pose funnel: `setAvatarPose` in `src/main.ts`
 - Scene / expression variants: `src/lib/scene.ts`
 - Rust commands + registration: `invoke_handler!` in `src-tauri/src/lib.rs`
-- Native OBS output: `src-tauri/src/gl_avatar_output.rs`

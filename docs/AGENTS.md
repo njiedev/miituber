@@ -35,8 +35,8 @@ The FFL renderer must be running at `http://127.0.0.1:5000` for render/tracking 
 
 ## Absolute DOs
 
-- **DO keep native window decorations** (`decorations: true`) on the clean-view and native output windows. Transparency comes from the alpha channel, never from a frameless window.
-- **DO keep the render as the output.** The native GL output window must render directly; never publish copied frames.
+- **DO keep native window decorations** (`decorations: true`) on the clean-view window. Transparency comes from the alpha channel, never from a frameless window.
+- **DO keep the render as the output.** The clean-view window must render directly; never publish copied frames.
 - **DO keep Rust/Tauri as the renderer boundary.** Validate/normalize avatar bytes in Rust before forwarding to the FFL server.
 - **DO clean up camera/mic lifecycles.** Stop streams when tracking/lip-sync ends.
 - **DO preserve separation** between the main control window and the clean/native output.
@@ -46,20 +46,16 @@ The FFL renderer must be running at `http://127.0.0.1:5000` for render/tracking 
 
 - **DON'T go frameless or add custom/substitute window controls** to chase transparency. This is the user's #1 priority and was violated repeatedly. Non-negotiable.
 - **DON'T reintroduce per-frame frame copying** (`readRenderTargetPixels` + Tauri IPC + GDI blit). It recreated a ~10fps bottleneck. The output must be the render itself.
-- **DON'T try to OBS Game Capture the WebView2/Chromium window.** It renders in a separate GPU process (`msedgewebview2.exe`) and flattens alpha before present — it cannot carry transparency. Use the native GL window.
+- **DON'T try to OBS Game Capture the WebView2/Chromium window.** It renders in a separate GPU process (`msedgewebview2.exe`) and flattens alpha before present — it cannot carry transparency. (This is why native GL was explored; that path is now parked — see roadmap. Use Clean View + OBS Window Capture.)
 - **DON'T use a chroma-key / colored background** the user must key out in OBS. The target is true per-pixel alpha with zero added OBS steps.
 - **DON'T call the FFL server directly from arbitrary frontend code.** Go through Rust.
 - **DON'T re-add removed output paths** (Spout2 sender, localhost MJPEG/PNG server, native Media Foundation "MiiTuber Camera") without strong new evidence — all removed for lag and platform surface area.
 - **DON'T claim modern 128-byte `.miic` v4 import is solved.** It is rejected until a real converter exists.
 - **DON'T expand scope** into body/hand tracking, avatar creation UI, multi-avatar scenes, or viseme-level lip-sync unless explicitly asked.
 
-## FFL GLB handling (native renderer)
+## FFL GLB handling (native renderer — parked)
 
-When loading the FFL GLB in Rust (`gl_avatar_output.rs`):
-
-- Strip the custom `_COLOR` vertex attribute from the GLB JSON — the Rust `gltf` crate rejects `_`-prefixed semantics (three.js tolerates them).
-- Force materials diffuse (`metallic = 0`); FFL omits `metallicFactor` so glTF defaults to fully metallic → near-black without an environment map.
-- Keep the `png` feature enabled on `three-d-asset` (FFL images are PNG).
+The native Rust GL renderer is parked (see the "Parked: Game Capture (native GL)" section in [research/roadmap.md](research/roadmap.md)). The hard-won GLB quirks that will matter when resuming — stripping the `_COLOR` vertex attribute for the strict Rust `gltf` crate, forcing materials diffuse, keeping `three-d-asset`'s `png` feature — are recorded there alongside the fidelity blocker.
 
 ## Debugging discipline (anti-loop)
 
