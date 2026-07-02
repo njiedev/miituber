@@ -88,21 +88,90 @@ fn read_expression() -> u32 {
     POSE_EXPRESSION.load(Ordering::Relaxed)
 }
 
-/// Open the native avatar output window on its own thread with its own message
-/// pump and GL context. `glb_bytes` is the FFL renderer GLB for the avatar.
-pub fn open(glb_bytes: Vec<u8>) {
+/// Material name the webview stamps on the face mask mesh before GLB export
+/// (see `src/lib/fflExport.ts`). The native side locates the face part by it.
+const FFL_MASK_MATERIAL_NAME: &str = "FFLMask";
+
+/// One face mask (eyes/mouth/brows) for a single expression, read off the GPU in
+/// the webview. In the FFL.js (option 1b) path the native renderer rebinds the
+/// face part's texture to `masks[expr]` each time the expression changes.
+pub struct MaskTexture {
+    pub expression: u32,
+    pub width: u32,
+    pub height: u32,
+    /// Tightly-packed RGBA (width * height * 4).
+    pub rgba: Vec<u8>,
+}
+
+/// Open the native output window from the raw payload the frontend packs (a
+/// static GLB followed by the mask textures). See `parse_payload` for the
+/// layout. An empty mask list selects the legacy server-GLB material-swap path.
+pub fn open_from_payload(payload: Vec<u8>) -> Result<(), String> {
+    let (glb_bytes, masks) = parse_payload(&payload)?;
+    if glb_bytes.is_empty() {
+        return Err("No GLB bytes were provided for the native output window.".to_string());
+    }
     if OUTPUT_OPEN.swap(true, Ordering::SeqCst) {
-        return;
+        return Ok(()); // A window is already open; ignore the repeat request.
     }
 
     std::thread::spawn(move || {
-        if let Err(error) = unsafe { run(glb_bytes) } {
+        if let Err(error) = unsafe { run(glb_bytes, masks) } {
             eprintln!("gl_avatar_output: {error}");
             let log_path = std::env::temp_dir().join("miituber_gl_output.log");
             let _ = std::fs::write(&log_path, format!("gl_avatar_output error: {error}\n"));
         }
         OUTPUT_OPEN.store(false, Ordering::SeqCst);
     });
+    Ok(())
+}
+
+/// Parse the little-endian native-output payload built by `packNativeOutputPayload`
+/// (src/lib/fflExport.ts):
+///   u32 glbLen | glb bytes | u32 maskCount |
+///   repeat: u32 expression, u32 width, u32 height, u32 rgbaLen, rgba bytes
+fn parse_payload(bytes: &[u8]) -> Result<(Vec<u8>, Vec<MaskTexture>), String> {
+    let mut off = 0usize;
+    let glb_len = read_u32(bytes, &mut off)? as usize;
+    let glb = read_slice(bytes, &mut off, glb_len)?.to_vec();
+
+    let mask_count = read_u32(bytes, &mut off)?;
+    let mut masks = Vec::with_capacity(mask_count as usize);
+    for _ in 0..mask_count {
+        let expression = read_u32(bytes, &mut off)?;
+        let width = read_u32(bytes, &mut off)?;
+        let height = read_u32(bytes, &mut off)?;
+        let rgba_len = read_u32(bytes, &mut off)? as usize;
+        let rgba = read_slice(bytes, &mut off, rgba_len)?.to_vec();
+        masks.push(MaskTexture {
+            expression,
+            width,
+            height,
+            rgba,
+        });
+    }
+
+    Ok((glb, masks))
+}
+
+fn read_u32(bytes: &[u8], off: &mut usize) -> Result<u32, String> {
+    let end = *off + 4;
+    if end > bytes.len() {
+        return Err("native output payload truncated (u32)".to_string());
+    }
+    let value = u32::from_le_bytes([bytes[*off], bytes[*off + 1], bytes[*off + 2], bytes[*off + 3]]);
+    *off = end;
+    Ok(value)
+}
+
+fn read_slice<'a>(bytes: &'a [u8], off: &mut usize, len: usize) -> Result<&'a [u8], String> {
+    let end = *off + len;
+    if end > bytes.len() {
+        return Err("native output payload truncated (slice)".to_string());
+    }
+    let slice = &bytes[*off..end];
+    *off = end;
+    Ok(slice)
 }
 
 fn encode_wide(value: &str) -> Vec<u16> {
@@ -128,7 +197,7 @@ unsafe extern "system" fn wnd_proc(
     }
 }
 
-unsafe fn run(glb_bytes: Vec<u8>) -> Result<(), String> {
+unsafe fn run(glb_bytes: Vec<u8>, masks: Vec<MaskTexture>) -> Result<(), String> {
     let h_instance = GetModuleHandleW(std::ptr::null());
     let class_name = encode_wide("MiiTuberGlAvatarOutput");
     let title = encode_wide("MiiTuber OBS Output (native GL)");
@@ -203,7 +272,7 @@ unsafe fn run(glb_bytes: Vec<u8>) -> Result<(), String> {
     let context = Context::from_gl_context(Arc::new(gl))
         .map_err(|error| format!("three-d context init failed: {error}"))?;
 
-    let render_result = render_loop(hwnd, hdc, &context, glb_bytes);
+    let render_result = render_loop(hwnd, hdc, &context, glb_bytes, masks);
 
     wglMakeCurrent(std::ptr::null_mut(), std::ptr::null_mut());
     wglDeleteContext(gl_context);
@@ -271,6 +340,7 @@ unsafe fn render_loop(
     hdc: *mut std::ffi::c_void,
     context: &Context,
     glb_bytes: Vec<u8>,
+    masks: Vec<MaskTexture>,
 ) -> Result<(), String> {
     let glb_bytes = strip_custom_vertex_attributes(glb_bytes);
 
@@ -293,25 +363,16 @@ unsafe fn render_loop(
         part.material.roughness = 1.0;
     }
 
-    // The face is drawn from one primitive (mesh "XluMask") whose expression is
-    // chosen via KHR_materials_variants. three-d's Model drops any material no
-    // primitive references, so the 18 non-default expression materials never
-    // reach the GPU. Rebuild them ourselves from the CpuModel: every material
-    // named "Material_XluMask_<expr>" is the face for that expression index.
-    let mut expression_materials: HashMap<u32, PhysicalMaterial> = HashMap::new();
-    for cpu_material in &cpu_model.materials {
-        if let Some(expression) = xlu_mask_expression(&cpu_material.name) {
-            let mut material = PhysicalMaterial::from_cpu_material(context, cpu_material);
-            material.metallic = 0.0;
-            material.roughness = 1.0;
-            expression_materials.insert(expression, material);
-        }
-    }
-
-    // The face part is the one whose default material is an XluMask material.
-    let face_part_index = model
-        .iter()
-        .position(|part| xlu_mask_expression(&part.material.name).is_some());
+    // Build the per-expression face materials + locate the face part. Two paths:
+    //   * FFL.js (option 1b): `masks` carries one texture per expression; clone
+    //     the face material and rebind its albedo texture per expression.
+    //   * legacy server GLB: expressions are baked as `Material_XluMask_<n>`
+    //     materials + KHR_materials_variants; rebuild those from the CpuModel.
+    let (expression_materials, face_part_index) = if masks.is_empty() {
+        build_legacy_expression_materials(context, &cpu_model, &model)
+    } else {
+        build_mask_expression_materials(context, &model, &masks)?
+    };
     let mut applied_expression = u32::MAX;
 
     let (scale, center) = model_framing(&model);
@@ -471,6 +532,81 @@ fn strip_custom_vertex_attributes(glb: Vec<u8>) -> Vec<u8> {
 /// it is the expression the frontend pushes via `set_gl_avatar_expression`.
 fn xlu_mask_expression(name: &str) -> Option<u32> {
     name.strip_prefix("Material_XluMask_")?.parse().ok()
+}
+
+/// FFL.js (option 1b) path: build one material per expression by cloning the
+/// face part's base material and swapping in that expression's mask texture.
+/// The face part is the one named `FFL_MASK_MATERIAL_NAME`.
+fn build_mask_expression_materials(
+    context: &Context,
+    model: &Model<PhysicalMaterial>,
+    masks: &[MaskTexture],
+) -> Result<(HashMap<u32, PhysicalMaterial>, Option<usize>), String> {
+    let face_index = model
+        .iter()
+        .position(|part| part.material.name == FFL_MASK_MATERIAL_NAME)
+        .ok_or_else(|| {
+            format!("native output: face mask material '{FFL_MASK_MATERIAL_NAME}' not found in GLB")
+        })?;
+    let base = model[face_index].material.clone();
+
+    let mut expression_materials = HashMap::new();
+    for mask in masks {
+        let cpu_texture = mask_to_cpu_texture(mask);
+        let texture = Texture2DRef::from_cpu_texture(context, &cpu_texture);
+
+        let mut material = base.clone();
+        material.albedo = Srgba::WHITE;
+        material.albedo_texture = Some(texture);
+        material.metallic = 0.0;
+        material.roughness = 1.0;
+        // The mask is a translucent overlay (transparent around the features).
+        material.is_transparent = true;
+        material.render_states.blend = Blend::TRANSPARENCY;
+        expression_materials.insert(mask.expression, material);
+    }
+
+    Ok((expression_materials, Some(face_index)))
+}
+
+/// Legacy server-GLB path: rebuild the per-expression face materials from the
+/// CpuModel's `Material_XluMask_<n>` materials (three-d drops materials that no
+/// primitive references, so the non-default expressions must be rebuilt).
+fn build_legacy_expression_materials(
+    context: &Context,
+    cpu_model: &CpuModel,
+    model: &Model<PhysicalMaterial>,
+) -> (HashMap<u32, PhysicalMaterial>, Option<usize>) {
+    let mut expression_materials = HashMap::new();
+    for cpu_material in &cpu_model.materials {
+        if let Some(expression) = xlu_mask_expression(&cpu_material.name) {
+            let mut material = PhysicalMaterial::from_cpu_material(context, cpu_material);
+            material.metallic = 0.0;
+            material.roughness = 1.0;
+            expression_materials.insert(expression, material);
+        }
+    }
+
+    let face_part_index = model
+        .iter()
+        .position(|part| xlu_mask_expression(&part.material.name).is_some());
+    (expression_materials, face_part_index)
+}
+
+/// Convert a raw-RGBA mask into a three-d CPU texture ready to upload.
+fn mask_to_cpu_texture(mask: &MaskTexture) -> CpuTexture {
+    let pixels: Vec<[u8; 4]> = mask
+        .rgba
+        .chunks_exact(4)
+        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3]])
+        .collect();
+
+    CpuTexture {
+        data: TextureData::RgbaU8(pixels),
+        width: mask.width,
+        height: mask.height,
+        ..Default::default()
+    }
 }
 
 /// Match scene.ts framing: uniformly scale the model so its largest axis spans

@@ -95,3 +95,44 @@ export async function exportCharModelForNativeOutput(
 
   return { glb: new Uint8Array(glbBuffer), maskTextures };
 }
+
+/**
+ * Pack an export into the single binary blob the native `open_gl_avatar_output`
+ * command reads as a Tauri v2 raw request body. Little-endian layout:
+ *
+ *   u32 glbLen | glb bytes |
+ *   u32 maskCount |
+ *   repeat maskCount: u32 expression, u32 width, u32 height, u32 rgbaLen, rgba
+ *
+ * Sending one ArrayBuffer keeps ~5 MB of pixel data off the JSON path.
+ */
+export function packNativeOutputPayload(exported: FflNativeExport): ArrayBuffer {
+  let total = 4 + exported.glb.byteLength + 4;
+  for (const mask of exported.maskTextures) {
+    total += 16 + mask.rgba.byteLength;
+  }
+
+  const buffer = new ArrayBuffer(total);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  let offset = 0;
+
+  view.setUint32(offset, exported.glb.byteLength, true);
+  offset += 4;
+  bytes.set(exported.glb, offset);
+  offset += exported.glb.byteLength;
+
+  view.setUint32(offset, exported.maskTextures.length, true);
+  offset += 4;
+  for (const mask of exported.maskTextures) {
+    view.setUint32(offset, mask.expression, true);
+    view.setUint32(offset + 4, mask.width, true);
+    view.setUint32(offset + 8, mask.height, true);
+    view.setUint32(offset + 12, mask.rgba.byteLength, true);
+    offset += 16;
+    bytes.set(mask.rgba, offset);
+    offset += mask.rgba.byteLength;
+  }
+
+  return buffer;
+}
