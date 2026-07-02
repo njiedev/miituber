@@ -90,10 +90,12 @@ export async function exportCharModelForNativeOutput(
   const [
     { ModelTexturesConverter },
     { default: FFLShaderMaterial },
+    { default: GeometryConverter },
     { GLTFExporter },
   ] = await Promise.all([
     import("ffl.js"),
     import("ffl.js/materials/FFLShaderMaterial.js"),
+    import("ffl.js/helpers/GeometryConverter.js"),
     import("three/examples/jsm/exporters/GLTFExporter.js"),
   ]);
   ModelTexturesConverter.convModelTexturesToRGBA(
@@ -102,6 +104,19 @@ export async function exportCharModelForNativeOutput(
     FFLShaderMaterial,
   );
   await ModelTexturesConverter.convModelTargetsToDataTex(charModel, renderer);
+
+  // 4. Normalize geometry for export. FFL meshes use interleaved, half-float
+  //    (Uint16) and SNORM (Int8) attributes; GLTFExporter emits those with
+  //    non-standard accessor component types (e.g. POSITION as UNSIGNED_SHORT)
+  //    that strict glTF parsers like three-d-asset reject. normalize()
+  //    de-interleaves and converts every attribute to Float32 (color stays
+  //    UNORM), and reduces normals to 3 components.
+  for (const child of charModel.meshes.children) {
+    const mesh = child as THREE.Mesh;
+    if (mesh.isMesh && mesh.geometry) {
+      GeometryConverter.normalize(mesh.geometry);
+    }
+  }
 
   const glbBuffer = (await new GLTFExporter().parseAsync(charModel.meshes, {
     binary: true,

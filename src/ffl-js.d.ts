@@ -97,3 +97,12 @@ declare module "ffl.js/materials/FFLShaderMaterial.js" {
   const FFLShaderMaterial: new (...args: unknown[]) => THREE.Material;
   export default FFLShaderMaterial;
 }
+
+declare module "ffl.js/helpers/GeometryConverter.js" {
+  import type * as THREE from "three";
+  /** Normalizes CharModel geometry (de-interleave, half/SNORM -> Float32) for exporters. */
+  const GeometryConverter: {
+    normalize(geometry: THREE.BufferGeometry): void;
+  };
+  export default GeometryConverter;
+}
