@@ -411,14 +411,15 @@ unsafe fn render_loop(
         100.0,
     );
 
-    // three-d's PBR adds ambient as intensity*albedo unconditionally, so an
-    // ambient >= 1 (the web preview used 1.35) saturates every surface to full
-    // brightness and drowns out the directional light — the model reads as a
-    // flat silhouette with no visible depth (e.g. the nose bump disappears).
-    // Keep ambient low so the key light actually models form; three.js's
-    // FFLShaderMaterial tolerates the high value the web scene uses, three-d
-    // does not.
-    let key_light = DirectionalLight::new(context, 2.4, Srgba::WHITE, vec3(-1.8, -2.5, -2.6));
+    // Depth on a frontal-facing face only appears when the key light *rakes*
+    // across it from the side: the camera looks down -Z and a nose points toward
+    // it just like the cheeks, so a frontal light (large -Z direction) gives them
+    // the same N·L and the nose bump vanishes. Drive the light mostly from the
+    // side (dominant -X) and above (-Y) with only a little front (-Z) so one side
+    // of the nose falls into shadow and reads as depth. A modest ambient fills
+    // the shadow without flattening it (three-d adds ambient as intensity*albedo
+    // unconditionally, so keep it well under 1).
+    let key_light = DirectionalLight::new(context, 2.4, Srgba::WHITE, vec3(-2.6, -1.4, -0.7));
     let ambient = AmbientLight::new(context, 0.35, Srgba::WHITE);
 
     let mut msg: MSG = std::mem::zeroed();
