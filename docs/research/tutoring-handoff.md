@@ -106,6 +106,18 @@ feature; it still expects GLB bytes the FFL path doesn't produce), thumbnails vi
 FFL.js, make FFL.js default + eventually delete the Rust HTTP renderer. See
 `docs/research/roadmap.md`.
 
+## The full curriculum / delta checklist — READ THIS
+`docs/research/ffl-swap-checklist.md` is the running list of everything on the
+answer-key branch (`ffl-swap-complete`) that this frozen branch must reach
+parity with — i.e. the ordered hand-coding curriculum. **Part A** = the
+expression 0–18 fix (the lesson in progress, above). **Part B** = native GL OBS
+output made offline via **option 1b** (export one static GLB + 19 mask textures
+from the CharModel; the native renderer swaps only the mask *texture* per
+expression — decided over 1a's 19-material approach because it mirrors how
+FFL.js's `setExpression` actually works). Part B is the next big Rust/3D lesson
+after the expression fix. Keep this checklist updated as the reference branch
+grows.
+
 ## Run / verify
 - App: `npm run tauri dev` (toggle `USE_FFL_JS` in `src/main.ts`).
 - Types: `npx tsc --noEmit`. Tests: `npx vitest run`.
