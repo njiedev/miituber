@@ -354,22 +354,39 @@ unsafe fn render_loop(
     // (a missing part, absent normals, unexpected albedo) can be diagnosed from
     // the log instead of guessed at. Runs once per window open.
     for prim in &cpu_model.geometries {
-        let (verts, has_normals, has_tangents, has_uvs) = match &prim.geometry {
-            three_d_asset::Geometry::Triangles(mesh) => (
-                mesh.positions.len(),
-                mesh.normals.is_some(),
-                mesh.tangents.is_some(),
-                mesh.uvs.is_some(),
-            ),
-            _ => (0, false, false, false),
+        let (verts, has_normals, has_tangents, has_uvs, normal_spread) = match &prim.geometry {
+            three_d_asset::Geometry::Triangles(mesh) => {
+                // If a strong side light produces no shading, the normals may be
+                // present but degenerate (all pointing the same way). Measure the
+                // per-axis min/max spread: a real curved surface spans a wide
+                // range on each axis; a constant/degenerate set collapses to ~0.
+                let spread = mesh.normals.as_ref().map(|normals| {
+                    let mut min = vec3(f32::MAX, f32::MAX, f32::MAX);
+                    let mut max = vec3(f32::MIN, f32::MIN, f32::MIN);
+                    for n in normals {
+                        min = vec3(min.x.min(n.x), min.y.min(n.y), min.z.min(n.z));
+                        max = vec3(max.x.max(n.x), max.y.max(n.y), max.z.max(n.z));
+                    }
+                    (max.x - min.x, max.y - min.y, max.z - min.z)
+                });
+                (
+                    mesh.positions.len(),
+                    mesh.normals.is_some(),
+                    mesh.tangents.is_some(),
+                    mesh.uvs.is_some(),
+                    spread,
+                )
+            }
+            _ => (0, false, false, false, None),
         };
         let material = prim.material_index.and_then(|i| cpu_model.materials.get(i));
         let mat_name = material.map(|m| m.name.as_str()).unwrap_or("<none>");
         let albedo = material.map(|m| m.albedo).unwrap_or(Srgba::WHITE);
+        let (sx, sy, sz) = normal_spread.unwrap_or((0.0, 0.0, 0.0));
         eprintln!(
             "gl_avatar_output: part '{}' verts={verts} normals={has_normals} \
              tangents={has_tangents} uvs={has_uvs} material='{mat_name}' \
-             albedo={},{},{},{}",
+             albedo={},{},{},{} normal_spread={sx:.2},{sy:.2},{sz:.2}",
             prim.name, albedo.r, albedo.g, albedo.b, albedo.a
         );
     }
