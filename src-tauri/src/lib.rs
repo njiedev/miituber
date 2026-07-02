@@ -218,19 +218,21 @@ fn open_gl_alpha_probe() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_gl_avatar_output(glb_bytes: Vec<u8>) -> Result<(), String> {
+fn open_gl_avatar_output(request: tauri::ipc::Request<'_>) -> Result<(), String> {
     #[cfg(windows)]
     {
-        if glb_bytes.is_empty() {
-            return Err("No GLB bytes were provided for the native output window.".to_string());
-        }
-        gl_avatar_output::open(glb_bytes);
-        Ok(())
+        let payload = match request.body() {
+            tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),
+            _ => {
+                return Err("Expected a raw binary payload for the native output window.".to_string())
+            }
+        };
+        gl_avatar_output::open_from_payload(payload)
     }
 
     #[cfg(not(windows))]
     {
-        let _ = glb_bytes;
+        let _ = request;
         Err("The native GL avatar output is only available on Windows.".to_string())
     }
 }

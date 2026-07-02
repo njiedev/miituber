@@ -5,6 +5,10 @@ import type { CharModel, FFLContext } from "ffl.js";
 import type { HeadRotation } from "./types";
 import { FFLExpression } from "./types";
 import { createCharModel } from "./fflRenderer";
+import {
+  exportCharModelForNativeOutput,
+  type FflNativeExport,
+} from "./fflExport";
 
 /** Count of expressions FFL.js can render on demand (CharModel needs no pre-bake). */
 const FFL_SUPPORTED_EXPRESSION_COUNT = Object.values(FFLExpression).filter(
@@ -178,6 +182,31 @@ export class AvatarScene {
       expressionCount: FFL_SUPPORTED_EXPRESSION_COUNT,
       ...framing,
     };
+  }
+
+  /**
+   * Serialize the avatar for the native GL OBS output window (roadmap #5, 1b).
+   * Builds a throwaway CharModel so the export's in-place texture conversion
+   * never touches the live preview model, then disposes it.
+   */
+  async exportForNativeOutput(
+    miiBytes: Uint8Array,
+    ffl: FFLContext,
+  ): Promise<FflNativeExport> {
+    const exportModel = await createCharModel(ffl, miiBytes, this.renderer);
+    try {
+      const expressions = Array.from(
+        { length: FFL_SUPPORTED_EXPRESSION_COUNT },
+        (_, index) => index,
+      );
+      return await exportCharModelForNativeOutput(
+        exportModel,
+        this.renderer,
+        expressions,
+      );
+    } finally {
+      exportModel.dispose(true);
+    }
   }
 
   setExpression(index: number) {

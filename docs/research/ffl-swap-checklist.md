@@ -68,34 +68,40 @@ over IPC, and it mirrors how FFL.js actually thinks.
 - **IPC payload size.** Passing `glb` + 19 masks as `number[]` (JSON) is ~5 MB/load.
   Fine once, but a later optimization is Tauri v2 raw-bytes (`tauri::ipc`).
 
-### B2 — Rust command surface (`src-tauri/src/lib.rs`)
-- [ ] Change `open_gl_avatar_output` to accept `{ glb_bytes, mask_textures }`
-      where each mask is `{ expression: u32, width: u32, height: u32, rgba:
-      Vec<u8> }` (serde-deserialized from the JS payload).
-- [ ] Thread that into `gl_avatar_output::open(...)`.
+### B2 — Rust command surface (`src-tauri/src/lib.rs`) · DONE
+- [x] `open_gl_avatar_output` now takes a `tauri::ipc::Request` and reads the raw
+      body (`InvokeBody::Raw`) — Tauri v2 raw bytes, not a JSON `number[]`.
+- [x] Delegates to `gl_avatar_output::open_from_payload(bytes)`.
 
-### B3 — Native renderer rewrite (`src-tauri/src/gl_avatar_output.rs`)
-- [ ] Drop the server-GLB assumptions: remove the `Material_XluMask_<n>` /
-      `xlu_mask_expression` / KHR-variants material-swap logic and the
-      `strip_custom_vertex_attributes` step if the exported GLB is clean.
-- [ ] On open: build 19 `Texture2D`s from the raw RGBA masks (keyed by
-      expression index). Locate the mask mesh part by the marker from B1.
-- [ ] Render loop: on expression change, rebind the mask part's base-color
-      texture to `mask_textures[expr]` (the 1b swap) instead of swapping the
-      whole material. Head-pose path is unchanged.
-- [ ] `set_gl_avatar_expression` semantics unchanged (still an index push).
+### B3 — Native renderer (`src-tauri/src/gl_avatar_output.rs`) · DONE (cargo check green)
+- [x] `parse_payload` unpacks the binary container into `(glb, Vec<MaskTexture>)`.
+- [x] `build_mask_expression_materials`: clone the face part's material (found by
+      material name `"FFLMask"`) and swap in each expression's mask texture
+      (`Texture2DRef::from_cpu_texture`), transparent-blended. This is the 1b swap.
+- [x] `build_legacy_expression_materials`: keep the old `Material_XluMask_<n>`
+      path for the empty-mask (server GLB) case. `strip_custom_vertex_attributes`
+      kept (defensive; harmless if the exported GLB has no `_`-attributes).
+- [x] Render loop rebinds the face part's material per expression, as before.
+- [x] `set_gl_avatar_expression` / pose semantics unchanged.
 
-### B4 — Wire + retire the stopgap (`src/main.ts`)
-- [ ] Replace `tryFetchNativeOutputGlb` (the best-effort server GLB) with the
-      B1 export; pass `{ glb, maskTextures }` to `open_gl_avatar_output`.
-- [ ] Remove the "needs the local FFL renderer running" fallback message.
+### B4 — Wire + retire the stopgap (`src/main.ts`) · DONE
+- [x] Removed `tryFetchNativeOutputGlb`; FFL path sets `latestGlbBytes = null`.
+- [x] Output button exports lazily (`avatarScene.exportForNativeOutput` on a
+      throwaway CharModel), packs via `packNativeOutputPayload`, invokes with the
+      raw `ArrayBuffer`. Non-FFL path packs the server GLB with zero masks.
 
 ### B5 — Verify
-- [ ] `npx tsc --noEmit` + `npx vitest run` green.
-- [ ] `cargo check` (in `src-tauri`) green.
+- [x] `npx tsc --noEmit` + `npx vitest run` (77) green.
+- [x] `cargo check` (in `src-tauri`) green.
 - [ ] **On-device only (Mohammed):** `npm run tauri dev` → open native output →
-      OBS Game Capture + Allow Transparency → confirm transparent avatar, head
-      tracking, and expression swaps 0–18. (Cannot be verified in CI/agent.)
+      OBS Game Capture + Allow Transparency. Confirm and, if needed, tweak:
+  - **Transparency/alpha:** avatar opaque over transparent bg in OBS.
+  - **Mask orientation:** if the face is upside-down/mirrored, the mask needs a
+    vertical (V) flip — `readRenderTargetPixels` is bottom-left origin, three-d
+    may expect top-left. Flip rows in `mask_to_cpu_texture` if so.
+  - **Mask color/blend:** features show with correct color (albedo forced WHITE +
+    `Blend::TRANSPARENCY`); adjust if washed out or hard-edged.
+  - **Expression swaps 0–18 + head tracking** track the webcam live.
 
 **Frozen-branch lesson(s):** likely split into (i) the webview export module and
 (ii) the native texture-swap rewrite — the Rust/3D piece is the deeper learning

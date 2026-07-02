@@ -13,6 +13,7 @@ import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
 import { LipSyncEnvelope, rootMeanSquare } from "./lib/lipSync";
 import { AvatarScene } from "./lib/scene";
 import { ensureReady, type FFLContext } from "./lib/fflRenderer";
+import { packNativeOutputPayload } from "./lib/fflExport";
 
 /**
  * When true, render Miis in-process via FFL.js instead of the external
@@ -943,18 +944,45 @@ glAlphaProbeButton?.addEventListener("click", async () => {
 });
 
 glAvatarOutputButton?.addEventListener("click", async () => {
-  if (!latestGlbBytes) {
+  if (!avatarLoaded) {
     if (glAvatarOutputStatusEl) {
       glAvatarOutputStatusEl.dataset.tone = "error";
-      glAvatarOutputStatusEl.textContent = avatarLoaded
-        ? "Native GL output needs the local FFL renderer running to build its GLB. Start it, then re-select the avatar."
-        : "Render an avatar first, then open the native GL output.";
+      glAvatarOutputStatusEl.textContent =
+        "Render an avatar first, then open the native GL output.";
     }
     return;
   }
 
   try {
-    await invoke("open_gl_avatar_output", { glbBytes: latestGlbBytes });
+    // Build the native-output payload. Under FFL.js, export the avatar (static
+    // GLB + 19 mask textures) lazily now; otherwise reuse the server GLB with no
+    // masks (the native side then falls back to its baked-material path).
+    let payload: ArrayBuffer;
+    if (USE_FFL_JS) {
+      if (!currentCleanOutputAvatar) {
+        throw new Error("No avatar is loaded to export.");
+      }
+      if (glAvatarOutputStatusEl) {
+        glAvatarOutputStatusEl.dataset.tone = "info";
+        glAvatarOutputStatusEl.textContent = "Exporting avatar for native output...";
+      }
+      const ffl = await getFflContext();
+      const exported = await avatarScene.exportForNativeOutput(
+        new Uint8Array(currentCleanOutputAvatar.bytes),
+        ffl,
+      );
+      payload = packNativeOutputPayload(exported);
+    } else {
+      if (!latestGlbBytes) {
+        throw new Error("No GLB is available for the native output.");
+      }
+      payload = packNativeOutputPayload({
+        glb: new Uint8Array(latestGlbBytes),
+        maskTextures: [],
+      });
+    }
+
+    await invoke("open_gl_avatar_output", payload);
     glAvatarOutputActive = true;
     if (glAvatarOutputStatusEl) {
       glAvatarOutputStatusEl.dataset.tone = "ok";
@@ -2021,25 +2049,6 @@ async function backfillThumbnail(id: string, bytes: number[]) {
   }
 }
 
-/**
- * Best-effort GLB fetch for the native GL OBS output window, which still needs
- * the FFL-server GLB (baked expression variants). Non-fatal: if the local
- * renderer is not running, return null and let the output button explain.
- */
-async function tryFetchNativeOutputGlb(
-  miiBytes: number[],
-): Promise<number[] | null> {
-  try {
-    return await invoke<number[]>("render_mii_glb", { miiBytes });
-  } catch (error) {
-    console.warn(
-      "[MiiTuber] native GL output GLB unavailable (local FFL renderer offline)",
-      { error },
-    );
-    return null;
-  }
-}
-
 async function renderAvatarBytes(miiBytes: number[], name: string) {
   try {
     let loadResult;
@@ -2050,12 +2059,9 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
         new Uint8Array(miiBytes),
         ffl,
       );
-      // Native GL OBS output (roadmap #5) still consumes an FFL-server-style
-      // GLB whose baked expression variants the in-webview CharModel does not
-      // yet emit. Until that path is ported to FFL.js, best-effort fetch the GLB
-      // from the retained local renderer so native output stays usable when it
-      // is running; the webview preview + thumbnails remain fully offline.
-      latestGlbBytes = await tryFetchNativeOutputGlb(miiBytes);
+      // Native GL OBS output is produced lazily on button-click by exporting the
+      // CharModel (GLB + mask textures), so there is nothing to prefetch here.
+      latestGlbBytes = null;
     } else {
       void refreshRendererHealth();
       setStatus("Requesting GLB from the local FFL renderer...");
