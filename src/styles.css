@@ -131,29 +131,6 @@ select {
   display: none !important;
 }
 
-.renderer-health {
-  padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--panel);
-  color: var(--text-soft);
-  font-size: 0.8rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.renderer-health[data-tone="error"] {
-  color: var(--error);
-  border-color: #e7c3bf;
-  background: #fdf3f2;
-}
-
-.renderer-health[data-tone="success"] {
-  color: var(--success);
-  border-color: #bfe0cc;
-  background: #f1faf4;
-}
-
 /* ---- Buttons ---- */
 .tbtn,
 .btn,

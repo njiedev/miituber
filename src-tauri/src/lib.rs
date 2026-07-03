@@ -14,12 +14,6 @@ const RENDERER_IMAGE_URL: &str = "http://127.0.0.1:5000/miis/image.png";
 const RENDERER_GLB_URL: &str = "http://127.0.0.1:5000/miis/image.glb";
 const ALL_FFL_EXPRESSIONS: &str = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18";
 
-#[derive(serde::Serialize)]
-struct RendererStatus {
-    reachable: bool,
-    message: String,
-}
-
 #[derive(Default)]
 struct RenderCache {
     glb_by_hash: Mutex<HashMap<String, Vec<u8>>>,
@@ -196,30 +190,6 @@ async fn render_mii_glb(
         .insert(cache_key, glb_bytes.clone());
 
     Ok(glb_bytes)
-}
-
-#[tauri::command]
-async fn check_renderer_status() -> RendererStatus {
-    let client = reqwest::Client::new();
-    let result = client
-        .get(RENDERER_IMAGE_URL)
-        .timeout(std::time::Duration::from_secs(2))
-        .send()
-        .await;
-
-    match result {
-        Ok(response) => RendererStatus {
-            reachable: true,
-            message: format!(
-                "FFL renderer is reachable on port 5000 ({})",
-                response.status()
-            ),
-        },
-        Err(error) => RendererStatus {
-            reachable: false,
-            message: format!("FFL renderer is not reachable on port 5000: {error}"),
-        },
-    }
 }
 
 fn compact_error_body(body: &str) -> String {
@@ -454,7 +424,6 @@ pub fn run() {
         .manage(SharedRenderCache::default())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            check_renderer_status,
             render_mii_glb,
             render_mii_png
         ])
