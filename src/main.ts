@@ -84,7 +84,6 @@ const isCleanOutputWindow =
 const fileInput = document.querySelector<HTMLInputElement>("#mii-file");
 const statusEl = document.querySelector<HTMLElement>("#status");
 const viewerCanvas = document.querySelector<HTMLCanvasElement>("#mii-viewer");
-const rendererHealthEl = document.querySelector<HTMLElement>("#renderer-health");
 const appShellEl = document.querySelector<HTMLElement>(".app-shell");
 const backToLibraryButton =
   document.querySelector<HTMLButtonElement>("#back-to-library");
@@ -232,11 +231,6 @@ type LipSyncCalibrationSession = {
   rmsSamples: number[];
 };
 
-type RendererStatus = {
-  reachable: boolean;
-  message: string;
-};
-
 type CleanOutputStoredAvatar = {
   name: string;
   bytes: number[];
@@ -262,16 +256,6 @@ function setStatus(message: string, tone: "idle" | "error" | "success" = "idle")
 
   statusEl.textContent = message;
   statusEl.dataset.tone = tone;
-}
-
-function setRendererHealth(
-  message: string,
-  tone: "idle" | "error" | "success" = "idle",
-) {
-  if (!rendererHealthEl) return;
-
-  rendererHealthEl.textContent = message;
-  rendererHealthEl.dataset.tone = tone;
 }
 
 function setTrackingStatus(
@@ -316,18 +300,6 @@ function setLipSyncStatus(
 
 function logRenderEvent(message: string, details: Record<string, unknown> = {}) {
   console.info(`[MiiTuber] ${message}`, details);
-}
-
-async function refreshRendererHealth() {
-  try {
-    const status = await invoke<RendererStatus>("check_renderer_status");
-    setRendererHealth(status.message, status.reachable ? "success" : "error");
-    logRenderEvent("renderer health checked", status);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    setRendererHealth(`Could not check renderer: ${message}`, "error");
-    console.error("[MiiTuber] check_renderer_status failed", { error, message });
-  }
 }
 
 function setTrackingButtons() {
@@ -535,7 +507,6 @@ function initializeMainWindow() {
   setAppMode("library");
   renderLibraryGrid();
   wireLibraryControls();
-  void refreshRendererHealth();
   void refreshCameraList();
   void refreshMicrophoneList();
   void listen(CLEAN_OUTPUT_READY_EVENT, () => {
@@ -1958,7 +1929,6 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
         ffl,
       );
     } else {
-      void refreshRendererHealth();
       setStatus("Requesting GLB from the local FFL renderer...");
       const glbBytes = await invoke<number[]>("render_mii_glb", { miiBytes });
       loadResult = await avatarScene.loadModelFromGlbBytes(glbBytes);
