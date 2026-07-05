@@ -63,6 +63,10 @@ miituber/
 
 The **Rust backend is the boundary** between the app and the local renderer. Frontend code must not call the FFL server directly.
 
+## Onboarding tour
+
+The first-run tour is split between pure state/navigation logic in `src/lib/tour.ts` and DOM/audio presentation in `src/lib/tourPresenter.ts`, with `src/main.ts` only wiring main-window start, workspace mode entry, and the replay `?` button. Chapter completion is persisted in `localStorage` under `miituber.onboardingTour.v1` as independent `library` and `workspace` flags; the clean-output window never initializes the presenter.
+
 ## Output paths (OBS)
 
 The active output is the **transparent Clean View webview + OBS Window Capture**: a separate WebView2 window renders the avatar on a transparent/keyable background that OBS captures as a Window source.
