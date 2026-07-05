@@ -15,6 +15,9 @@ npm run build               # tsc + vite production build
 npm.cmd exec tsc -- --noEmit  # type-check only
 npm test                    # Vitest (TypeScript logic)
 
+npm run dev:landing         # waitlist landing page dev server (landing/, port 5173)
+npm run build:landing       # static landing-page build → dist-landing/
+
 npm run verify:renderer-glb -- mee.ffsd bridge/verify-mee.glb  # verify GLB variants
 
 cd src-tauri
@@ -84,3 +87,8 @@ Treat `docs/` as part of the code. In the same change where you:
 - change high-level goals or run instructions → update `README.md`
 
 `MYTODO.md` in the repo root is the human owner's personal scratch list — do not reformat, restructure, or delete it.
+
+## extra:
+After implementing something involving a real decision (new abstraction, data flow, 
+choice between alternatives), offer: "Want me to grill you on this before we move on?" 
+See the grill-me skill. Skip the nudge for mechanical fixes/renames.

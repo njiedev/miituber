@@ -5,6 +5,7 @@ Notable changes to MiiTuber. This is a prototype (`0.1.0`), so entries are group
 ## Unreleased
 
 ### Added
+- **Waitlist landing page** (`landing/`, built via `npm run dev:landing` / `build:landing`). A one-viewport faux MiiTuber window styled with the app's own tokens: live FFL.js Mii over the OBS alpha checkerboard, cursor-following head, heart-eyes (26) + arms-up pose on waitlist-button hover, BIG_SMILE (32) on signup success / CRY (30) on failure, idle `Wait00` animation, wink-on-poke easter egg, and an X/Twitter link chip in the appbar. Extended expressions ride a new opt-in `extraExpressions` param on `createCharModel` (app behavior unchanged — extras must be baked at CharModel creation). Waitlist endpoint is a placeholder const (`WAITLIST_ENDPOINT` in `landing/main.ts`) with a mailto fallback. Rig note: the body GLB's real arm chain is `chest → arm_l1 → arm_l2 → wrist`; the `shoulder_*`/`elbow_*` nodes are leaf helper joints.
 - **Transparent clean-capture isolate mode** for OBS.
 - **Avatar library start screen** with draggable control panels.
 

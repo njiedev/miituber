@@ -39,6 +39,12 @@ miituber/
 │       ├── lib.rs              Tauri commands: renderer status, GLB/PNG render,
 │       │                       input normalization, caching
 │       └── main.rs             Binary entry
+├── landing/                Standalone waitlist landing page (separate Vite
+│   │                       build: vite.landing.config.ts → dist-landing/)
+│   ├── index.html          Faux app-window layout reusing src/styles.css
+│   ├── main.ts             FFL boot, cursor-follow, hover pose, waitlist form
+│   └── miiStage.ts         Slim AvatarScene cousin: idle anim plays, excited
+│                           arm pose, transparent clear over CSS checkerboard
 ├── scripts/verify-renderer-glb.mjs   GLB variant verification tool
 ├── mee.ffsd                Known-good sample avatar
 └── docs/                   This documentation set

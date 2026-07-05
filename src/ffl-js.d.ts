@@ -39,6 +39,18 @@ declare module "ffl.js" {
     expressions: number | number[],
   ): Uint32Array;
 
+  /** Subset of decoded Mii parameters (CharInfo) we read for body rendering. */
+  export type FFLiCharInfo = {
+    /** 0 = male, 1 = female — selects which base body mesh to use. */
+    gender: number;
+    /** Body weight parameter (0..127); feeds getBodyScale(). */
+    build: number;
+    /** Body height parameter (0..127); feeds getBodyScale(). */
+    height: number;
+    /** Packed favorite-color index. */
+    favoriteColor: number;
+  };
+
   export class CharModel {
     constructor(
       ffl: FFLContext,
@@ -48,14 +60,27 @@ declare module "ffl.js" {
       renderer: THREE.WebGLRenderer,
     );
     /** Group of meshes to add to a Three.js scene. */
-    readonly meshes: THREE.Object3D;
+    readonly meshes: THREE.Group;
     /** Currently active expression (read-only). */
     readonly expression: number;
+    /** Decoded Mii parameters — drives body gender/scale/shirt color. */
+    readonly charInfo: FFLiCharInfo;
+    /** Favorite color as a resolved THREE.Color (used for the body shirt). */
+    readonly favoriteColor: THREE.Color;
+    /** Convenience accessor for charInfo.gender. */
+    readonly gender: number;
+    /** Non-uniform scale vector for the body model, from build + height. */
+    getBodyScale(): { x: number; y: number; z: number };
     /** Swap the mask/faceline texture to the given FFLExpression value. */
     setExpression(expression: number): void;
     /** Release GPU/textures and detach from the scene. */
     dispose(disposeTargets?: boolean): void;
   }
+
+  /** Enum of pants color keys (RedRegular, GrayNormal, GoldSpecial, ...). */
+  export const PantsColor: Record<string, number>;
+  /** THREE.Color per PantsColor key. */
+  export const pantsColors: Record<number, THREE.Color>;
 
   /** Helpers for turning a CharModel's render-target textures into exportable data. */
   export const ModelTexturesConverter: {
@@ -105,4 +130,42 @@ declare module "ffl.js/helpers/GeometryConverter.js" {
     normalize(geometry: THREE.BufferGeometry): void;
   };
   export default GeometryConverter;
+}
+
+declare module "ffl.js/helpers/BodyUtilities.js" {
+  import type * as THREE from "three";
+  /** A loaded body GLB plus its scale descriptor and animation state. */
+  export type BodyModel = {
+    model: THREE.Object3D;
+    animations: THREE.AnimationClip[];
+    mixer: THREE.AnimationMixer;
+    /** Opaque ModelScaleDesc from detectModelDesc(); passed straight back in. */
+    scaleDesc: unknown;
+  };
+  /** Applies shirt/pants colors, the given material, and per-Mii bone scaling. */
+  export function prepareBodyForCharModel(
+    body: BodyModel,
+    material: unknown,
+    favoriteColor: THREE.Color,
+    bodyScale: { x: number; y: number; z: number },
+    pantsColor: THREE.Color,
+  ): void;
+  /** Parents the head group onto the body's head bone (scales it to match). */
+  export function attachHeadToBody(body: BodyModel, head: THREE.Object3D): void;
+  /** Disposes a body model's geometry, materials, maps, and skeleton. */
+  export function disposeModel(model: THREE.Object3D): void;
+}
+
+declare module "ffl.js/helpers/ModelScaleDesc.js" {
+  import type * as THREE from "three";
+  /** Detects how a body GLB's bones should scale (bone names, behavior flags). */
+  export function detectModelDesc(object: THREE.Object3D): unknown;
+}
+
+declare module "ffl.js/helpers/SkeletonScalingExtensions.js" {
+  import type * as THREE from "three";
+  /** Patches THREE.Skeleton with attach()/per-bone scaling. Call once globally. */
+  export function addSkeletonScalingExtensions(
+    Skeleton: typeof THREE.Skeleton,
+  ): void;
 }
