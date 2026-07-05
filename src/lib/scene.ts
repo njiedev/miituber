@@ -53,12 +53,13 @@ export function expressionIndexFromVariantName(name: unknown): number | null {
 const BODY_MODEL_URLS = ["/body/male.glb", "/body/female.glb"] as const;
 
 /**
- * Where the camera looks / orbits, as a fraction up the model's bounding box
- * (0 = feet, 1 = top of head). Below 0.5 looks lower than the geometric center,
- * which raises the avatar in the frame and puts the zoom pivot on the body
- * rather than empty space above it. Tune to taste.
+ * Where the camera looks, as a fraction up the model's bounding box (0 = feet,
+ * 1 = top of head). 0.5 centers the whole body vertically in the frame.
  */
-const FRAME_VERTICAL_FOCUS = 0.2;
+const FRAME_VERTICAL_FOCUS = 0.5;
+
+/** Breathing room around the model when fitting it to the viewport. */
+const FRAME_FIT_MARGIN = 1.15;
 
 export class AvatarScene {
   private static readonly DEFAULT_BACKGROUND = new THREE.Color(0xe8f0f7);
@@ -95,6 +96,14 @@ export class AvatarScene {
   private readonly framedTarget = new THREE.Vector3();
   /** Camera distance from framedTarget that fits the model in view. */
   private framedDistance = 3;
+  /** Cached model bounds (skinning-aware) so re-framing on an aspect change
+   *  never re-measures the mesh. */
+  private readonly modelCenter = new THREE.Vector3();
+  private readonly modelSize = new THREE.Vector3();
+  private hasFraming = false;
+  /** Last canvas pixel size, so resize() only re-fits when the shape changes. */
+  private lastViewWidth = 0;
+  private lastViewHeight = 0;
   private background: AvatarBackground = {
     color: "#e8f0f7",
     transparent: false,
@@ -200,8 +209,13 @@ export class AvatarScene {
       mesh.frustumCulled = false;
     });
 
-    const framing = this.frameModel(this.currentModel);
+    // Skinned meshes only get valid world transforms once rendered, and the
+    // bone-driven head pivot only settles onto the neck after a skeleton
+    // update — so add and render one frame BEFORE framing, or the fit box
+    // measures the bind pose with a mislocated head.
     this.modelRoot.add(this.currentModel);
+    this.renderer.render(this.scene, this.camera);
+    const framing = this.frameModel(this.currentModel);
     this.setExpression(0);
 
     return {
@@ -383,9 +397,17 @@ export class AvatarScene {
     const width = Math.max(1, Math.floor(rect.width));
     const height = Math.max(1, Math.floor(rect.height));
 
+    if (width === this.lastViewWidth && height === this.lastViewHeight) return;
+    this.lastViewWidth = width;
+    this.lastViewHeight = height;
+
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+
+    // Re-fit on aspect change so the model stays centered and fully in frame
+    // at any window shape, not just the square it first loaded into.
+    if (this.hasFraming) this.applyFraming();
   }
 
   private async cacheVariantMaterials(gltf: GLTF) {
@@ -423,31 +445,73 @@ export class AvatarScene {
     await Promise.all(materialPromises);
   }
 
+  /**
+   * Skinning-aware bounds. THREE.Box3.setFromObject uses raw (bind-pose)
+   * geometry bounds, which for the FFL body rig come out far larger and
+   * off-center than the posed mesh — that stale, asymmetric box is what threw
+   * the camera off-center and mis-zoomed once the frame stopped being square.
+   * SkinnedMesh.computeBoundingBox() applies the bone transforms, so union
+   * those per mesh instead.
+   */
+  private computeVisualBox(model: THREE.Object3D): THREE.Box3 {
+    model.updateWorldMatrix(true, true);
+    const box = new THREE.Box3();
+    const meshBox = new THREE.Box3();
+    model.traverse((child) => {
+      const mesh = child as THREE.SkinnedMesh;
+      if (!mesh.isMesh) return;
+      if (mesh.isSkinnedMesh) {
+        mesh.computeBoundingBox();
+        if (!mesh.boundingBox) return;
+        meshBox.copy(mesh.boundingBox).applyMatrix4(mesh.matrixWorld);
+      } else {
+        meshBox.setFromObject(mesh);
+      }
+      box.union(meshBox);
+    });
+    return box;
+  }
+
   private frameModel(model: THREE.Object3D) {
     // Frame by moving the camera, NOT by rescaling the model. The FFL body rig
     // is authored in a native ~100-unit space and the head is attached via the
     // skeleton's own world-matrix management (which assumes body world scale
     // 1.0); rescaling the root shrinks the body but not the head, producing a
-    // giant head. Fitting via camera distance is scale-agnostic, so it works
-    // for the ~100-unit body and the old ~1-unit head-only GLB alike.
+    // giant head. Fitting via camera distance is scale-agnostic.
     model.rotation.set(0, 0, 0);
-    model.updateWorldMatrix(true, true);
-    const box = new THREE.Box3().setFromObject(model);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const box = this.computeVisualBox(model);
+    box.getCenter(this.modelCenter);
+    box.getSize(this.modelSize);
+    this.hasFraming = true;
+    this.applyFraming();
 
-    // Distance so maxDim fits the vertical FOV, with 30% breathing room.
+    return {
+      center: this.modelCenter.toArray() as [number, number, number],
+      size: this.modelSize.toArray() as [number, number, number],
+      scale: 1,
+    };
+  }
+
+  /**
+   * Position the camera to fit the cached model bounds in the current viewport.
+   * Fits BOTH axes — vertical straight from the camera FOV, horizontal via the
+   * aspect-derived horizontal FOV — and takes the larger distance, so the whole
+   * body stays fully visible and centered whether the window is wide or tall.
+   */
+  private applyFraming() {
+    const size = this.modelSize;
     const vFov = THREE.MathUtils.degToRad(this.camera.fov);
-    const distance = (maxDim / 2 / Math.tan(vFov / 2)) * 1.3;
+    const tanV = Math.tan(vFov / 2);
+    const aspect = this.camera.aspect || 1;
 
-    // Look at a point a set fraction up the body (see FRAME_VERTICAL_FOCUS),
-    // not the raw geometric center — keeps the avatar from sitting low with the
-    // orbit pivot floating above it.
+    const fitHeight = size.y / 2 / tanV;
+    const fitWidth = size.x / 2 / (tanV * aspect);
+    const distance = Math.max(fitHeight, fitWidth, 0.01) * FRAME_FIT_MARGIN;
+
     this.framedTarget.set(
-      center.x,
-      box.min.y + size.y * FRAME_VERTICAL_FOCUS,
-      center.z,
+      this.modelCenter.x,
+      this.modelCenter.y + size.y * (FRAME_VERTICAL_FOCUS - 0.5),
+      this.modelCenter.z,
     );
     this.framedDistance = distance;
 
@@ -459,12 +523,6 @@ export class AvatarScene {
     this.controls.maxDistance = distance * 3;
 
     this.resetCameraView();
-
-    return {
-      center: center.toArray() as [number, number, number],
-      size: size.toArray() as [number, number, number],
-      scale: 1,
-    };
   }
 
   private disposeCurrentModel() {
