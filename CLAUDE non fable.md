@@ -1,0 +1,1 @@
+Read AGENTS.md in this repo root before taking any action.
