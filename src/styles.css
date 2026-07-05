@@ -374,15 +374,27 @@ select {
 
 .preview-frame {
   position: relative;
-  display: grid;
-  place-items: center;
+  width: 100%;
   height: 100%;
-  aspect-ratio: 1;
-  max-width: 100%;
   border: 0;
   border-radius: 0;
   background: var(--avatar-background);
   overflow: hidden;
+}
+
+/* Transparent-background preview: an alpha checkerboard behind the canvas so
+   the Mii reads as floating on transparency while the workspace UI stays
+   visible. True window transparency (for OBS) still comes from the
+   capture-isolate / clean-output paths, never from this. */
+.preview-frame.transparent-preview {
+  background-color: #eef0f2;
+  background-image:
+    linear-gradient(45deg, #d5d9de 25%, transparent 25%),
+    linear-gradient(-45deg, #d5d9de 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #d5d9de 75%),
+    linear-gradient(-45deg, transparent 75%, #d5d9de 75%);
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-size: 24px 24px;
 }
 
 #mii-viewer {
@@ -398,9 +410,18 @@ select {
 
 .empty-preview {
   position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
   pointer-events: none;
   color: var(--text-soft);
   font-weight: 600;
+}
+
+/* display:grid above would otherwise beat the UA [hidden] { display:none },
+   leaving the placeholder text painted over a loaded avatar. */
+.empty-preview[hidden] {
+  display: none;
 }
 
 /* ---- Status toast ---- */
@@ -1092,4 +1113,81 @@ body.capture-isolate .preview-frame {
 
 body.capture-isolate .empty-preview {
   display: none;
+}
+
+/* Fading "Press Esc to go back" hint shown when entering clean-capture
+   (isolate) mode. Must end fully transparent so it never lingers in the
+   OBS clean capture. */
+.isolate-hint {
+  position: fixed;
+  left: 50%;
+  top: 40px;
+  transform: translate(-50%, 8px);
+  z-index: 60;
+  display: none;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(20, 24, 31, 0.72);
+  color: #f4f7fb;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.isolate-hint kbd {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+body.capture-isolate .isolate-hint.is-visible {
+  display: block;
+  animation: isolate-hint-fade 3s ease forwards;
+}
+
+@keyframes isolate-hint-fade {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes isolate-hint-fade {
+    0% {
+      opacity: 0;
+      transform: translate(-50%, 0);
+    }
+    10% {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    70% {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, 0);
+    }
+  }
 }

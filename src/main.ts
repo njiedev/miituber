@@ -107,12 +107,14 @@ const importNameInput = document.querySelector<HTMLInputElement>("#import-name")
 const importStatusEl = document.querySelector<HTMLElement>("#import-status");
 const importSaveButton = document.querySelector<HTMLButtonElement>("#import-save");
 const emptyPreviewEl = document.querySelector<HTMLElement>(".empty-preview");
+const previewFrameEl = document.querySelector<HTMLElement>(".preview-frame");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
 const debugMaterialsInput =
   document.querySelector<HTMLInputElement>("#debug-materials");
 const transparentBackgroundInput = document.querySelector<HTMLInputElement>(
   "#transparent-background",
 );
+const isolateHintEl = document.querySelector<HTMLElement>("#isolate-hint");
 const backgroundColorInput =
   document.querySelector<HTMLInputElement>("#background-color");
 const startTrackingButton = document.querySelector<HTMLButtonElement>(
@@ -1465,6 +1467,16 @@ function setIsolateMode(enabled: boolean) {
     }
   }
 
+  if (isolateHintEl) {
+    // Re-trigger the fade animation each time isolate mode is entered so the
+    // "Press Esc to go back" prompt reappears; it fades fully out on its own.
+    isolateHintEl.classList.remove("is-visible");
+    if (enabled) {
+      void isolateHintEl.offsetWidth; // force reflow to restart the animation
+      isolateHintEl.classList.add("is-visible");
+    }
+  }
+
   updateAvatarBackground();
   requestAnimationFrame(() => {
     avatarScene.resize();
@@ -1489,12 +1501,16 @@ function updateAvatarBackground() {
     return;
   }
 
-  const mainColor = transparent ? "transparent" : color;
+  // In the workspace, "transparent" shows an alpha checkerboard behind the
+  // canvas (a preview) instead of making the whole window see-through — the
+  // latter blanked the entire view. Real OBS transparency still comes from the
+  // capture-isolate / clean-output paths.
   avatarScene.setBackground({ color, transparent });
-  document.documentElement.style.setProperty("--avatar-background", mainColor);
-  document.documentElement.style.backgroundColor = mainColor;
-  document.body.style.backgroundColor = mainColor;
-  canvas.style.backgroundColor = mainColor;
+  previewFrameEl?.classList.toggle("transparent-preview", transparent);
+  document.documentElement.style.setProperty("--avatar-background", color);
+  document.documentElement.style.backgroundColor = "";
+  document.body.style.backgroundColor = "";
+  canvas.style.backgroundColor = "";
   publishCleanOutputBackground();
 }
 
@@ -1952,12 +1968,7 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
       ...loadResult,
     });
     if (emptyPreviewEl) emptyPreviewEl.hidden = true;
-    setStatus(
-      loadResult.expressionCount > 0
-        ? `Rendered GLB with ${loadResult.expressionCount} expression variants.`
-        : "Rendered GLB, but no expression variants were found.",
-      loadResult.expressionCount > 0 ? "success" : "idle",
-    );
+    setStatus("");
     setTrackingStatus(
       loadResult.expressionCount > 0
         ? "Ready to start webcam tracking."
