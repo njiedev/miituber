@@ -374,15 +374,27 @@ select {
 
 .preview-frame {
   position: relative;
-  display: grid;
-  place-items: center;
+  width: 100%;
   height: 100%;
-  aspect-ratio: 1;
-  max-width: 100%;
   border: 0;
   border-radius: 0;
   background: var(--avatar-background);
   overflow: hidden;
+}
+
+/* Transparent-background preview: an alpha checkerboard behind the canvas so
+   the Mii reads as floating on transparency while the workspace UI stays
+   visible. True window transparency (for OBS) still comes from the
+   capture-isolate / clean-output paths, never from this. */
+.preview-frame.transparent-preview {
+  background-color: #eef0f2;
+  background-image:
+    linear-gradient(45deg, #d5d9de 25%, transparent 25%),
+    linear-gradient(-45deg, #d5d9de 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #d5d9de 75%),
+    linear-gradient(-45deg, transparent 75%, #d5d9de 75%);
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-size: 24px 24px;
 }
 
 #mii-viewer {
@@ -398,9 +410,18 @@ select {
 
 .empty-preview {
   position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
   pointer-events: none;
   color: var(--text-soft);
   font-weight: 600;
+}
+
+/* display:grid above would otherwise beat the UA [hidden] { display:none },
+   leaving the placeholder text painted over a loaded avatar. */
+.empty-preview[hidden] {
+  display: none;
 }
 
 /* ---- Status toast ---- */
