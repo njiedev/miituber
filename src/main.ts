@@ -68,6 +68,15 @@ import {
   setAvatarThumbnail,
   type LibraryAvatar,
 } from "./lib/avatarLibrary";
+import {
+  readTourState,
+  shouldAutoStart,
+  TOUR_CHAPTERS,
+  TourController,
+  writeTourState,
+  type TourChapterId,
+} from "./lib/tour";
+import { TourPresenter } from "./lib/tourPresenter";
 
 const CLEAN_OUTPUT_WINDOW_LABEL = "clean-output";
 const CLEAN_OUTPUT_VIEW = "clean-output";
@@ -78,13 +87,24 @@ const CLEAN_OUTPUT_POSE_EVENT = "clean-output-pose";
 const CLEAN_OUTPUT_READY_EVENT = "clean-output-ready";
 const CLEAN_OUTPUT_HIDDEN_EVENT = "clean-output-hidden";
 
-const isCleanOutputWindow =
-  new URLSearchParams(window.location.search).get("view") === CLEAN_OUTPUT_VIEW;
+const searchParams = new URLSearchParams(window.location.search);
+const isCleanOutputWindow = searchParams.get("view") === CLEAN_OUTPUT_VIEW;
+const isPortraitCaptureMode =
+  import.meta.env.DEV && searchParams.has("capture-portraits");
+
+if (isPortraitCaptureMode) {
+  void import("./dev/capturePortraits").then((module) =>
+    module.runPortraitCapture(),
+  );
+}
 
 const fileInput = document.querySelector<HTMLInputElement>("#mii-file");
 const statusEl = document.querySelector<HTMLElement>("#status");
 const viewerCanvas = document.querySelector<HTMLCanvasElement>("#mii-viewer");
 const appShellEl = document.querySelector<HTMLElement>(".app-shell");
+const tourRootEl = document.querySelector<HTMLElement>("#tour-root");
+const tourReplayButton =
+  document.querySelector<HTMLButtonElement>("#tour-replay-button");
 const backToLibraryButton =
   document.querySelector<HTMLButtonElement>("#back-to-library");
 const workspaceAvatarNameEl = document.querySelector<HTMLElement>(
@@ -222,6 +242,9 @@ let lipSyncRawRms = 0;
 let lipSyncCalibrationSession: LipSyncCalibrationSession | null = null;
 let microphoneAvailable = true;
 const lipSyncEnvelope = new LipSyncEnvelope();
+let activeTourController: TourController | null = null;
+let activeTourPresenter: TourPresenter | null = null;
+let activeTourChapterId: TourChapterId | null = null;
 
 type CalibrationSession = {
   startedAt: number;
@@ -493,6 +516,8 @@ const expressionPipeline = new ExpressionPipeline(tuningProfile);
 window.addEventListener("resize", () => avatarScene.resize());
 if (isCleanOutputWindow) {
   void initializeCleanOutputWindow();
+} else if (isPortraitCaptureMode) {
+  // The capture utility owns the page DOM and is loaded dynamically above.
 } else {
   initializeMainWindow();
 }
@@ -509,6 +534,8 @@ function initializeMainWindow() {
   setAppMode("library");
   renderLibraryGrid();
   wireLibraryControls();
+  wireTourControls();
+  startTourIfNeeded("library");
   void refreshCameraList();
   void refreshMicrophoneList();
   void listen(CLEAN_OUTPUT_READY_EVENT, () => {
@@ -1586,10 +1613,83 @@ function getLibraryStorage() {
   return window.localStorage;
 }
 
+function getTourStorage() {
+  return window.localStorage;
+}
+
+function wireTourControls() {
+  tourReplayButton?.addEventListener("click", replayCurrentTour);
+}
+
+function replayCurrentTour() {
+  const chapterId: TourChapterId = appShellEl?.classList.contains("mode-workspace")
+    ? "workspace"
+    : "library";
+  startTour(chapterId);
+}
+
+function startTourIfNeeded(chapterId: TourChapterId) {
+  if (isCleanOutputWindow || activeTourChapterId === chapterId) return;
+
+  const state = readTourState(getTourStorage());
+  if (shouldAutoStart(chapterId, state)) {
+    startTour(chapterId);
+  }
+}
+
+function startTour(chapterId: TourChapterId) {
+  if (isCleanOutputWindow || !tourRootEl) return;
+
+  endActiveTour();
+
+  const controller = new TourController((completedChapterId) => {
+    const state = readTourState(getTourStorage());
+    writeTourState(getTourStorage(), {
+      ...state,
+      [completedChapterId]: true,
+    });
+
+    if (activeTourController === controller) {
+      activeTourController = null;
+      activeTourPresenter = null;
+      activeTourChapterId = null;
+    }
+  });
+  controller.start(TOUR_CHAPTERS[chapterId]);
+
+  const presenter = new TourPresenter({
+    root: tourRootEl,
+    controller,
+    sfxUrl: "/mii-sfx.m4a",
+    portraitBaseUrl: "/tour/",
+  });
+
+  activeTourController = controller;
+  activeTourPresenter = presenter;
+  activeTourChapterId = chapterId;
+  presenter.start();
+}
+
+function endActiveTour() {
+  const controller = activeTourController;
+  const presenter = activeTourPresenter;
+
+  activeTourController = null;
+  activeTourPresenter = null;
+  activeTourChapterId = null;
+
+  controller?.skip();
+  presenter?.destroy();
+}
+
 function setAppMode(mode: "library" | "workspace") {
   if (!appShellEl) return;
   appShellEl.classList.toggle("mode-library", mode === "library");
   appShellEl.classList.toggle("mode-workspace", mode === "workspace");
+
+  if (mode === "workspace") {
+    startTourIfNeeded("workspace");
+  }
 }
 
 function renderLibraryGrid() {
