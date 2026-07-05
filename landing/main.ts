@@ -11,11 +11,10 @@ const FFL_RESOURCE_URL = "/AFLResHigh_2_3.dat";
 const FFL_WASM_URL = "/ffl-emscripten.wasm";
 
 /**
- * Where waitlist signups go. Point this at a form backend (Formspree,
- * Buttondown, a worker…) that accepts `POST { email }` as JSON. While empty,
- * the form falls back to a prefilled signup email.
+ * Where waitlist signups go: a Formspree form that accepts `POST { email }` as
+ * JSON. If ever emptied, the form falls back to a prefilled signup email.
  */
-const WAITLIST_ENDPOINT = "";
+const WAITLIST_ENDPOINT = "https://formspree.io/f/xdarbdow";
 const WAITLIST_FALLBACK_EMAIL = "njiedoescs@gmail.com";
 
 /**
@@ -212,7 +211,12 @@ form.addEventListener("submit", async (event) => {
   try {
     const response = await fetch(WAITLIST_ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // Accept JSON so Formspree returns a status + body instead of a 302
+      // redirect to its own thank-you page (which fetch would silently follow).
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
       body: JSON.stringify({ email }),
     });
     if (!response.ok) throw new Error(`waitlist ${response.status}`);
