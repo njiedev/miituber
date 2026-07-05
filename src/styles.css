@@ -189,6 +189,14 @@ select {
   cursor: not-allowed;
 }
 
+.tour-replay-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  font-weight: 700;
+}
+
 .checker-btn {
   width: 26px;
   height: 26px;
@@ -1011,6 +1019,193 @@ select {
   text-align: right;
 }
 
+/* ---- Onboarding tour ---- */
+.tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  font-family: var(--font);
+}
+
+.tour-spotlight {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(20, 28, 38, 0.55);
+  pointer-events: none;
+  transition:
+    top 180ms ease,
+    left 180ms ease,
+    width 180ms ease,
+    height 180ms ease;
+}
+
+.tour-dialogue {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  display: flex;
+  align-items: flex-end;
+  gap: 20px;
+  width: min(720px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.tour-dialogue__portrait {
+  width: 104px;
+  height: 104px;
+  flex: none;
+  object-fit: contain;
+  image-rendering: auto;
+  filter: drop-shadow(0 6px 10px rgba(20, 28, 38, 0.35));
+  animation: tour-portrait-in 220ms ease-out;
+}
+
+.tour-dialogue__content {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 96px;
+  padding: 16px 20px 30px;
+  border: 2px solid #c4cfd9;
+  border-radius: 20px;
+  background: linear-gradient(#ffffff, #f3f7fa);
+  box-shadow: var(--shadow);
+  transform-origin: 0% 100%;
+  animation: tour-bubble-in 180ms ease-out;
+}
+
+/* Speech-bubble tail pointing at the portrait: outer triangle draws the
+   border, inner triangle fills with the bubble background. */
+.tour-dialogue__content::before,
+.tour-dialogue__content::after {
+  content: "";
+  position: absolute;
+  bottom: 26px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+.tour-dialogue__content::before {
+  left: -17px;
+  border-width: 11px 17px 11px 0;
+  border-color: transparent #c4cfd9 transparent transparent;
+}
+
+.tour-dialogue__content::after {
+  left: -13px;
+  border-width: 9px 14px 9px 0;
+  border-color: transparent #ffffff transparent transparent;
+}
+
+.tour-dialogue__text {
+  min-height: 42px;
+  margin: 0;
+  color: var(--text);
+  font-size: 1.02rem;
+  line-height: 1.5;
+}
+
+.tour-dialogue__next {
+  position: absolute;
+  right: 18px;
+  bottom: 10px;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 700;
+  animation: tour-next-bob 900ms ease-in-out infinite;
+}
+
+.tour-dialogue__next[hidden] {
+  display: none;
+}
+
+.tour-dialogue__skip {
+  position: absolute;
+  left: 144px;
+  bottom: -2px;
+  border: 0;
+  padding: 4px 6px;
+  background: transparent;
+  color: rgba(244, 247, 251, 0.82);
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.tour-dialogue__skip:hover {
+  color: #ffffff;
+}
+
+@keyframes tour-bubble-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes tour-portrait-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tour-next-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(3px);
+  }
+}
+
+@media (max-width: 560px) {
+  .tour-dialogue {
+    bottom: 12px;
+    gap: 12px;
+  }
+
+  .tour-dialogue__portrait {
+    width: 64px;
+    height: 64px;
+  }
+
+  .tour-dialogue__skip {
+    left: 88px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-spotlight {
+    transition: none;
+  }
+
+  .tour-dialogue__portrait,
+  .tour-dialogue__content,
+  .tour-dialogue__next {
+    animation: none;
+  }
+}
+
 /* ---- Clean output window ---- */
 html.clean-output-mode,
 body.clean-output-mode {
@@ -1032,7 +1227,8 @@ body.clean-output-mode .side-rail,
 body.clean-output-mode .menu-popover,
 body.clean-output-mode .status-toast,
 body.clean-output-mode .library-screen,
-body.clean-output-mode .modal-scrim {
+body.clean-output-mode .modal-scrim,
+body.clean-output-mode .tour-root {
   display: none !important;
 }
 
@@ -1085,7 +1281,8 @@ body.capture-isolate .side-rail,
 body.capture-isolate .menu-popover,
 body.capture-isolate .status-toast,
 body.capture-isolate .library-screen,
-body.capture-isolate .modal-scrim {
+body.capture-isolate .modal-scrim,
+body.capture-isolate .tour-root {
   display: none !important;
 }
 

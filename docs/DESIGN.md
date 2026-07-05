@@ -47,6 +47,12 @@ Design tokens live in `:root` at the top of `src/styles.css`. Keep this doc in s
 4. Device controls — camera, tracking FPS, microphone, mouth source
 5. Advanced tuning / debug — inside collapsible panels
 
+## Onboarding tour
+
+- The tour dialogue is a Wii-style speech bubble: the Mii portrait stands free at bottom-left (transparent PNG with a drop shadow, no card behind it) and the text lives in a white rounded bubble (2px `#c4cfd9` border, white-to-`#f3f7fa` gradient) with an outlined CSS-triangle tail pointing at the portrait. The "Next ▸" affordance bobs gently; bubble and portrait get short pop/slide entrance animations (all disabled under reduced motion). "Skip tour" sits below the bubble in light text against the dimmer.
+- The spotlight uses a fixed overlay above modals (`z-index: 200`) with a box-shadow dimmer and a rounded cutout around the target. It introduces no new design tokens and respects reduced-motion by disabling the cutout transition.
+- `.tour-root` is hidden in both clean-output and capture-isolate modes so OBS-facing output stays pure.
+
 ## Principles
 
 - Make the default import → render → track → output workflow obvious.
