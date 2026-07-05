@@ -1114,3 +1114,80 @@ body.capture-isolate .preview-frame {
 body.capture-isolate .empty-preview {
   display: none;
 }
+
+/* Fading "Press Esc to go back" hint shown when entering clean-capture
+   (isolate) mode. Must end fully transparent so it never lingers in the
+   OBS clean capture. */
+.isolate-hint {
+  position: fixed;
+  left: 50%;
+  top: 40px;
+  transform: translate(-50%, 8px);
+  z-index: 60;
+  display: none;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(20, 24, 31, 0.72);
+  color: #f4f7fb;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.isolate-hint kbd {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+body.capture-isolate .isolate-hint.is-visible {
+  display: block;
+  animation: isolate-hint-fade 3s ease forwards;
+}
+
+@keyframes isolate-hint-fade {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes isolate-hint-fade {
+    0% {
+      opacity: 0;
+      transform: translate(-50%, 0);
+    }
+    10% {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    70% {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, 0);
+    }
+  }
+}

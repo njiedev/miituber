@@ -114,6 +114,7 @@ const debugMaterialsInput =
 const transparentBackgroundInput = document.querySelector<HTMLInputElement>(
   "#transparent-background",
 );
+const isolateHintEl = document.querySelector<HTMLElement>("#isolate-hint");
 const backgroundColorInput =
   document.querySelector<HTMLInputElement>("#background-color");
 const startTrackingButton = document.querySelector<HTMLButtonElement>(
@@ -1466,6 +1467,16 @@ function setIsolateMode(enabled: boolean) {
     }
   }
 
+  if (isolateHintEl) {
+    // Re-trigger the fade animation each time isolate mode is entered so the
+    // "Press Esc to go back" prompt reappears; it fades fully out on its own.
+    isolateHintEl.classList.remove("is-visible");
+    if (enabled) {
+      void isolateHintEl.offsetWidth; // force reflow to restart the animation
+      isolateHintEl.classList.add("is-visible");
+    }
+  }
+
   updateAvatarBackground();
   requestAnimationFrame(() => {
     avatarScene.resize();
@@ -1957,12 +1968,7 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
       ...loadResult,
     });
     if (emptyPreviewEl) emptyPreviewEl.hidden = true;
-    setStatus(
-      loadResult.expressionCount > 0
-        ? `Rendered GLB with ${loadResult.expressionCount} expression variants.`
-        : "Rendered GLB, but no expression variants were found.",
-      loadResult.expressionCount > 0 ? "success" : "idle",
-    );
+    setStatus("");
     setTrackingStatus(
       loadResult.expressionCount > 0
         ? "Ready to start webcam tracking."
