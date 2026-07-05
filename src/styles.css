@@ -1048,49 +1048,78 @@ select {
   position: fixed;
   left: 50%;
   bottom: 24px;
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  width: min(760px, calc(100vw - 32px));
-  min-height: 112px;
-  padding: 16px 18px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 14px;
-  background: rgba(20, 24, 31, 0.82);
-  box-shadow: var(--shadow);
-  color: #f4f7fb;
+  display: flex;
+  align-items: flex-end;
+  gap: 20px;
+  width: min(720px, calc(100vw - 32px));
   transform: translateX(-50%);
   pointer-events: auto;
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
 }
 
 .tour-dialogue__portrait {
-  width: 72px;
-  height: 72px;
+  width: 104px;
+  height: 104px;
+  flex: none;
   object-fit: contain;
   image-rendering: auto;
+  filter: drop-shadow(0 6px 10px rgba(20, 28, 38, 0.35));
+  animation: tour-portrait-in 220ms ease-out;
 }
 
 .tour-dialogue__content {
+  position: relative;
+  flex: 1;
   min-width: 0;
+  min-height: 96px;
+  padding: 16px 20px 30px;
+  border: 2px solid #c4cfd9;
+  border-radius: 20px;
+  background: linear-gradient(#ffffff, #f3f7fa);
+  box-shadow: var(--shadow);
+  transform-origin: 0% 100%;
+  animation: tour-bubble-in 180ms ease-out;
+}
+
+/* Speech-bubble tail pointing at the portrait: outer triangle draws the
+   border, inner triangle fills with the bubble background. */
+.tour-dialogue__content::before,
+.tour-dialogue__content::after {
+  content: "";
+  position: absolute;
+  bottom: 26px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+.tour-dialogue__content::before {
+  left: -17px;
+  border-width: 11px 17px 11px 0;
+  border-color: transparent #c4cfd9 transparent transparent;
+}
+
+.tour-dialogue__content::after {
+  left: -13px;
+  border-width: 9px 14px 9px 0;
+  border-color: transparent #ffffff transparent transparent;
 }
 
 .tour-dialogue__text {
   min-height: 42px;
   margin: 0;
-  color: #f4f7fb;
-  font-size: 1rem;
-  line-height: 1.45;
+  color: var(--text);
+  font-size: 1.02rem;
+  line-height: 1.5;
 }
 
 .tour-dialogue__next {
-  display: inline-block;
-  margin-top: 8px;
-  color: #ffffff;
+  position: absolute;
+  right: 18px;
+  bottom: 10px;
+  color: var(--accent);
   font-size: 0.85rem;
   font-weight: 700;
+  animation: tour-next-bob 900ms ease-in-out infinite;
 }
 
 .tour-dialogue__next[hidden] {
@@ -1098,12 +1127,14 @@ select {
 }
 
 .tour-dialogue__skip {
-  align-self: end;
+  position: absolute;
+  left: 144px;
+  bottom: -2px;
   border: 0;
-  padding: 4px 0;
+  padding: 4px 6px;
   background: transparent;
-  color: rgba(244, 247, 251, 0.76);
-  font-size: 0.82rem;
+  color: rgba(244, 247, 251, 0.82);
+  font-size: 0.8rem;
   text-decoration: underline;
   cursor: pointer;
 }
@@ -1112,26 +1143,66 @@ select {
   color: #ffffff;
 }
 
+@keyframes tour-bubble-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes tour-portrait-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tour-next-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(3px);
+  }
+}
+
 @media (max-width: 560px) {
   .tour-dialogue {
-    grid-template-columns: 56px minmax(0, 1fr);
     bottom: 12px;
+    gap: 12px;
   }
 
   .tour-dialogue__portrait {
-    width: 56px;
-    height: 56px;
+    width: 64px;
+    height: 64px;
   }
 
   .tour-dialogue__skip {
-    grid-column: 2;
-    justify-self: start;
+    left: 88px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .tour-spotlight {
     transition: none;
+  }
+
+  .tour-dialogue__portrait,
+  .tour-dialogue__content,
+  .tour-dialogue__next {
+    animation: none;
   }
 }
 
