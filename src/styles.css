@@ -317,15 +317,18 @@ select {
 }
 
 .avatar-tile__menu button {
-  display: grid;
-  place-items: center;
-  width: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 24px;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.92);
   color: var(--text-soft);
-  font-size: 0.85rem;
+  font-size: 0.7rem;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -340,7 +343,7 @@ select {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  aspect-ratio: 1;
+  min-height: 100%;
   border: 1px dashed #9aaab9;
   border-radius: 6px;
   background: #f7f9fb;

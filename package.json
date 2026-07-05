@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "dev:landing": "vite --config vite.landing.config.ts",
+    "build:landing": "tsc && vite build --config vite.landing.config.ts",
     "verify:renderer-glb": "node scripts/verify-renderer-glb.mjs",
     "test": "vitest run",
     "preview": "vite preview",

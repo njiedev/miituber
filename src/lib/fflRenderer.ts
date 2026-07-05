@@ -72,10 +72,16 @@ export function isInitStarted(): boolean {
  */
 const MAX_FACE_EXPRESSION = 18;
 
+/**
+ * `extraExpressions` opts in stylized extras beyond the face-driven 0..18
+ * (e.g. STUNNED 69) — expressions must be baked at CharModel creation or
+ * `setExpression()` throws ExpressionNotSet later.
+ */
 export async function createCharModel(
   ffl: FFLContext,
   miiBytes: Uint8Array,
   renderer: THREE.WebGLRenderer,
+  extraExpressions: readonly number[] = [],
 ): Promise<CharModel> {
   const [
     { CharModel, FFLCharModelDescDefault, makeExpressionFlag },
@@ -93,7 +99,10 @@ export async function createCharModel(
   );
   const desc = {
     ...FFLCharModelDescDefault,
-    allExpressionFlag: makeExpressionFlag(faceExpressions),
+    allExpressionFlag: makeExpressionFlag([
+      ...faceExpressions,
+      ...extraExpressions,
+    ]),
   };
 
   return new CharModel(ffl, miiBytes, desc, FFLShaderMaterial, renderer);

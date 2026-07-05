@@ -1,0 +1,65 @@
+name: Release
+
+# Fires ONLY when you push a version tag like v0.2.0 — never on a normal commit.
+# That tag push is the deliberate "cut a release" act; ordinary commits to main
+# do nothing here.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    permissions:
+      # tauri-action needs write access to create the GitHub Release + upload assets.
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows installer (.exe/.msi) — your users' platform.
+          - platform: "windows-latest"
+            args: ""
+          # Apple-Silicon macOS build — so you can run it natively on your Mac.
+          - platform: "macos-latest"
+            args: "--target aarch64-apple-darwin"
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Provided automatically by GitHub — lets the action create the Release.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Your updater signing key (Part A). Bundles are signed from day one so
+          # they're update-ready the moment you wire the in-app updater.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # Use the tag that triggered the run (e.g. v0.2.0) as the release tag.
+          tagName: ${{ github.ref_name }}
+          releaseName: "MiiTuber ${{ github.ref_name }}"
+          releaseBody: "Download the installer for your platform from the assets below."
+          # Publish as a DRAFT so you review/edit notes before it goes public.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
