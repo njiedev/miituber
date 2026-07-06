@@ -15,9 +15,6 @@ npm run build               # tsc + vite production build
 npm.cmd exec tsc -- --noEmit  # type-check only
 npm test                    # Vitest (TypeScript logic)
 
-npm run dev:landing         # waitlist landing page dev server (landing/, port 5173)
-npm run build:landing       # static landing-page build → dist-landing/
-
 npm run verify:renderer-glb -- mee.ffsd bridge/verify-mee.glb  # verify GLB variants
 
 cd src-tauri
