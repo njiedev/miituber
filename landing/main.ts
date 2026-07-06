@@ -26,6 +26,8 @@ const EXTRA_EXPRESSIONS = {
   LoveOpenMouth: 26,
   Cry: 30,
   BigSmile: 32,
+  Unbelievable: 41,
+  Innocent: 47,
 } as const;
 /** The hover face for the waitlist button. */
 const HOVER_EXPRESSION: number = EXTRA_EXPRESSIONS.LoveOpenMouth;
@@ -33,6 +35,10 @@ const HOVER_EXPRESSION: number = EXTRA_EXPRESSIONS.LoveOpenMouth;
 const SUCCESS_EXPRESSION: number = EXTRA_EXPRESSIONS.BigSmile;
 /** The signup-failed face. */
 const FAIL_EXPRESSION: number = EXTRA_EXPRESSIONS.Cry;
+/** The hover face for the YouTube chip. */
+const YOUTUBE_EXPRESSION: number = EXTRA_EXPRESSIONS.Unbelievable;
+/** The hover face for the X chip. */
+const X_EXPRESSION: number = EXTRA_EXPRESSIONS.Innocent;
 
 const canvas = document.querySelector<HTMLCanvasElement>("#mii-stage")!;
 const placeholder = document.querySelector<HTMLElement>("#stage-placeholder")!;
@@ -40,7 +46,8 @@ const form = document.querySelector<HTMLFormElement>("#waitlist-form")!;
 const emailInput = document.querySelector<HTMLInputElement>("#waitlist-email")!;
 const joinButton = document.querySelector<HTMLButtonElement>("#waitlist-button")!;
 const waitlistStatus = document.querySelector<HTMLElement>("#waitlist-status")!;
-
+const ytButton = document.querySelector<HTMLElement>(".yt-chip")!;
+const xButton = document.querySelector<HTMLElement>(".x-chip")!;
 const stage = new MiiStage(canvas);
 
 /** Expression state, lowest priority first. Blink/wink overlay whatever holds. */
@@ -157,6 +164,13 @@ function setExcited(excited: boolean) {
   baseExpression = excited ? HOVER_EXPRESSION : FFLExpression.Normal;
   applyExpression();
 }
+/** Hover face for the social chips: each chip picks its own expression. */
+function setChipFace(active: boolean, expression: number) {
+  // Arms still track hover even mid-celebration; only the face is locked.
+  if (performance.now() < resultHoldUntil) return;
+  baseExpression = active ? expression : FFLExpression.Normal;
+  applyExpression();
+}
 
 /** Show a signup result face and hold it against hover for RESULT_HOLD_MS. */
 function showResult(expression: number) {
@@ -169,6 +183,16 @@ joinButton.addEventListener("pointerenter", () => setExcited(true));
 joinButton.addEventListener("pointerleave", () => setExcited(false));
 joinButton.addEventListener("focus", () => setExcited(true));
 joinButton.addEventListener("blur", () => setExcited(false));
+
+xButton.addEventListener("pointerenter", () => setChipFace(true, X_EXPRESSION));
+xButton.addEventListener("pointerleave", () => setChipFace(false, X_EXPRESSION));
+xButton.addEventListener("focus", () => setChipFace(true, X_EXPRESSION));
+xButton.addEventListener("blur", () => setChipFace(false, X_EXPRESSION));
+
+ytButton.addEventListener("pointerenter", () => setChipFace(true, YOUTUBE_EXPRESSION));
+ytButton.addEventListener("pointerleave", () => setChipFace(false, YOUTUBE_EXPRESSION));
+ytButton.addEventListener("focus", () => setChipFace(true, YOUTUBE_EXPRESSION));
+ytButton.addEventListener("blur", () => setChipFace(false, YOUTUBE_EXPRESSION));
 
 // ---- Easter egg: poke the Mii, get a wink and a head tilt ----
 
