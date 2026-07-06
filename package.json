@@ -10,8 +10,9 @@
     "build:landing": "tsc && vite build --config vite.landing.config.ts",
     "verify:renderer-glb": "node scripts/verify-renderer-glb.mjs",
     "test": "vitest run",
-    "preview": "vite preview",
-    "tauri": "tauri"
+    "preview": "npm run build && wrangler dev",
+    "tauri": "tauri",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
@@ -22,9 +23,11 @@
     "three": "^0.184.0"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.43.0",
     "@tauri-apps/cli": "^2",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "wrangler": "^4.107.0"
   }
 }
