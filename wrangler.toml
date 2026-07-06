@@ -1,0 +1,15 @@
+# Cloudflare Workers config for the MiiTuber waitlist landing page.
+#
+# Deploy is `npx wrangler deploy`; build with `npm run build:landing`, which
+# emits the static site to dist-landing/. This is an assets-only Worker (no
+# server script) — Cloudflare just serves the built files, with correct MIME
+# types for the FFL .wasm/.dat so the Mii renders.
+#
+# Providing this file explicitly stops wrangler from auto-detecting the app's
+# vite.config.ts (the Tauri app) and trying to build/serve that instead.
+
+name = "miituber-landing"
+compatibility_date = "2026-07-06"
+
+[assets]
+directory = "./dist-landing"
