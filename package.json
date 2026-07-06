@@ -14,6 +14,7 @@
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-global-shortcut": "^2.3.2",
     "@tauri-apps/plugin-opener": "^2",
     "@types/three": "^0.184.1",
     "ffl.js": "github:ariankordi/FFL.js#v2.2.0",

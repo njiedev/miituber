@@ -81,6 +81,7 @@ import { TourPresenter } from "./lib/tourPresenter";
 const CLEAN_OUTPUT_WINDOW_LABEL = "clean-output";
 const CLEAN_OUTPUT_VIEW = "clean-output";
 const CLEAN_OUTPUT_AVATAR_STORAGE_KEY = "miituber.cleanOutputAvatar.v1";
+const BODY_VISIBLE_STORAGE_KEY = "miituber.bodyVisible.v1";
 const CLEAN_OUTPUT_AVATAR_EVENT = "clean-output-avatar";
 const CLEAN_OUTPUT_BACKGROUND_EVENT = "clean-output-background";
 const CLEAN_OUTPUT_POSE_EVENT = "clean-output-pose";
@@ -129,6 +130,7 @@ const importSaveButton = document.querySelector<HTMLButtonElement>("#import-save
 const emptyPreviewEl = document.querySelector<HTMLElement>(".empty-preview");
 const previewFrameEl = document.querySelector<HTMLElement>(".preview-frame");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
+const bodyVisibleInput = document.querySelector<HTMLInputElement>("#body-visible");
 const debugMaterialsInput =
   document.querySelector<HTMLInputElement>("#debug-materials");
 const transparentBackgroundInput = document.querySelector<HTMLInputElement>(
@@ -526,6 +528,7 @@ function initializeMainWindow() {
   populateExpressionSelect();
   populateTuningControls();
   updateAvatarBackground();
+  initializeBodyVisibleToggle();
   resetAvatarTrackingState();
   setTrackingButtons();
   setOutputButtons();
@@ -864,6 +867,13 @@ expressionSelect?.addEventListener("change", () => {
   const expressionIndex = Number(expressionSelect.value);
   setAvatarPose(expressionIndex, latestCleanOutputPose.headRotation);
   logRenderEvent("manual expression selected", { expressionIndex });
+});
+
+bodyVisibleInput?.addEventListener("change", () => {
+  const visible = bodyVisibleInput.checked;
+  avatarScene.setBodyVisible(visible);
+  writeBodyVisiblePreference(visible);
+  logRenderEvent("body visibility toggled", { visible });
 });
 
 debugMaterialsInput?.addEventListener("change", () => {
@@ -1615,6 +1625,37 @@ function getLibraryStorage() {
 
 function getTourStorage() {
   return window.localStorage;
+}
+
+function readBodyVisiblePreference() {
+  try {
+    const raw = localStorage.getItem(BODY_VISIBLE_STORAGE_KEY);
+    if (raw === null) return true;
+
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === "boolean" ? parsed : true;
+  } catch (error) {
+    console.warn("[MiiTuber] could not read body visibility preference", {
+      error,
+    });
+    return true;
+  }
+}
+
+function writeBodyVisiblePreference(visible: boolean) {
+  try {
+    localStorage.setItem(BODY_VISIBLE_STORAGE_KEY, JSON.stringify(visible));
+  } catch (error) {
+    console.warn("[MiiTuber] could not save body visibility preference", {
+      error,
+    });
+  }
+}
+
+function initializeBodyVisibleToggle() {
+  const visible = readBodyVisiblePreference();
+  if (bodyVisibleInput) bodyVisibleInput.checked = visible;
+  avatarScene.setBodyVisible(visible);
 }
 
 function wireTourControls() {

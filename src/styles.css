@@ -89,6 +89,11 @@ select {
   font-size: 0.85rem;
 }
 
+.app-disclaimer {
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
 .side-rail {
   position: absolute;
   top: 16px;

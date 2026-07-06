@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import type { CharModel, FFLContext } from "ffl.js";
 import type { BodyModel } from "ffl.js/helpers/BodyUtilities.js";
 import type { HeadRotation } from "./types";
@@ -53,6 +54,15 @@ export function expressionIndexFromVariantName(name: unknown): number | null {
 const BODY_MODEL_URLS = ["/body/male.glb", "/body/female.glb"] as const;
 
 /**
+ * Vertical seat adjustment for the head, in FFL head units (pre-pivot-scale).
+ * attachHeadToBody pins the pivot exactly to the body's `head` bone, but the
+ * Wii U body GLB's head bone sits slightly low relative to its neck opening,
+ * sinking the head into the chest. Raise the head inside the pivot to
+ * compensate; tune per body model swap.
+ */
+const HEAD_SEAT_Y_OFFSET = 9;
+
+/**
  * Where the camera looks, as a fraction up the model's bounding box (0 = feet,
  * 1 = top of head). 0.5 centers the whole body vertically in the frame.
  */
@@ -90,6 +100,7 @@ export class AvatarScene {
   private variantMesh: MeshWithMaterial | null = null;
   private selectedExpression = 0;
   private debugMaterialsEnabled = false;
+  private bodyVisible = true;
   private renderFrameCount = 0;
   private lastRenderFpsAt = performance.now();
   /** World-space point the camera orbits/points at (the framed model's center). */
@@ -115,6 +126,8 @@ export class AvatarScene {
   ) {
     this.scene.background = AvatarScene.DEFAULT_BACKGROUND;
     this.scene.add(this.modelRoot);
+    // The Wii U body GLB is meshopt-compressed (EXT_meshopt_compression).
+    this.loader.setMeshoptDecoder(MeshoptDecoder);
 
     this.camera.position.set(0, 0.05, 3);
 
@@ -200,6 +213,7 @@ export class AvatarScene {
     this.bodyModel = body;
     this.currentModel = body.model;
     this.headRoot = charModel.meshes;
+    this.applyBodyVisibility();
 
     let meshCount = 0;
     this.currentModel.traverse((child) => {
@@ -304,6 +318,9 @@ export class AvatarScene {
     const headPivot = new THREE.Group();
     headPivot.name = "head-pivot";
     headPivot.add(charModel.meshes);
+    // The pivot's matrix is bone-driven, but children compose on top of it —
+    // so the seat offset lives on the head meshes, not the pivot.
+    charModel.meshes.position.y = HEAD_SEAT_Y_OFFSET;
     attachHeadToBody(body, headPivot);
 
     this.disposeBodyModelFn = disposeModel;
@@ -337,6 +354,33 @@ export class AvatarScene {
       THREE.MathUtils.degToRad(rotation.yaw),
       THREE.MathUtils.degToRad(rotation.roll),
     );
+  }
+
+  setBodyVisible(visible: boolean) {
+    this.bodyVisible = visible;
+    this.applyBodyVisibility();
+  }
+
+  private applyBodyVisibility() {
+    if (!this.bodyModel) return;
+
+    const headPivot = this.bodyModel.model.getObjectByName("head-pivot") ?? null;
+    this.bodyModel.model.traverse((child) => {
+      const mesh = child as THREE.SkinnedMesh;
+      if (!mesh.isSkinnedMesh) return;
+      if (headPivot && this.isDescendantOf(child, headPivot)) return;
+
+      mesh.visible = this.bodyVisible;
+    });
+  }
+
+  private isDescendantOf(child: THREE.Object3D, ancestor: THREE.Object3D) {
+    let current: THREE.Object3D | null = child;
+    while (current) {
+      if (current === ancestor) return true;
+      current = current.parent;
+    }
+    return false;
   }
 
   setDebugMaterials(enabled: boolean) {

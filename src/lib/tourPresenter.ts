@@ -21,6 +21,8 @@ const PORTRAIT_EMOTIONS: TourEmotion[] = [
 ];
 const MOUTH_FLIP_MS = 125;
 const SPOTLIGHT_PADDING = 6;
+/** Longest the typewriter waits for audio to actually start before running anyway. */
+const AUDIO_START_WAIT_MS = 300;
 
 export class TourPresenter {
   private readonly audio: HTMLAudioElement;
@@ -35,6 +37,7 @@ export class TourPresenter {
   private animationId: number | null = null;
   private activeStep: TourStep | null = null;
   private lineStartedAt = 0;
+  private awaitingAudioStart = false;
   private renderedChars = -1;
   private lineComplete = false;
   private destroyed = false;
@@ -132,6 +135,16 @@ export class TourPresenter {
   private renderFrame = (now: number): void => {
     if (this.destroyed || !this.activeStep) return;
 
+    if (this.awaitingAudioStart) {
+      // Clock is parked until audio starts; past the cap, run without it.
+      if (now - this.lineStartedAt < AUDIO_START_WAIT_MS) {
+        this.animationId = requestAnimationFrame(this.renderFrame);
+        return;
+      }
+      this.awaitingAudioStart = false;
+      this.lineStartedAt = now;
+    }
+
     const elapsedMs = now - this.lineStartedAt;
     const visible = charsVisible(elapsedMs, this.activeStep.text.length);
     this.renderText(visible);
@@ -184,11 +197,20 @@ export class TourPresenter {
   }
 
   private playAudio(): void {
+    // play() only makes sound after decode/autoplay checks, so hold the
+    // typewriter and re-anchor its clock to when playback actually starts.
+    this.awaitingAudioStart = true;
+    const step = this.activeStep;
+    const releaseText = () => {
+      if (this.destroyed || this.activeStep !== step || !this.awaitingAudioStart) return;
+      this.awaitingAudioStart = false;
+      this.lineStartedAt = performance.now();
+    };
     try {
-      const playResult = this.audio.play();
-      void playResult.catch(() => undefined);
+      this.audio.play().then(releaseText, releaseText);
     } catch {
       // Audio is optional; autoplay/user-gesture blocking must not block the tour.
+      releaseText();
     }
   }
 
