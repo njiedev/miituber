@@ -51,7 +51,27 @@ body.landing {
   font-size: 0.78rem;
   text-decoration: none;
 }
-
+.yt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  border: 1px solid #000000;
+  border-radius: 999px;
+  background: #ff0000;
+  color: #ffffff;
+  font-size: 0.78rem;
+  text-decoration: none;
+}
+.yt-chip__logo {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+.yt-chip:hover {
+  background: #790404;
+  border-color: #000000;
+}
 .x-chip__logo {
   width: 11px;
   height: 11px;
