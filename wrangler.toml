@@ -11,5 +11,12 @@
 name = "miituber-landing"
 compatibility_date = "2026-07-06"
 
+# Serve the site on the apex domain. custom_domain = true makes Cloudflare
+# create/manage the DNS record and cert automatically — requires miituber.com
+# to be an active zone in this Cloudflare account.
+routes = [
+  { pattern = "miituber.com", custom_domain = true },
+]
+
 [assets]
 directory = "./dist-landing"
