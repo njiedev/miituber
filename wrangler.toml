@@ -8,7 +8,7 @@
 # Providing this file explicitly stops wrangler from auto-detecting the app's
 # vite.config.ts (the Tauri app) and trying to build/serve that instead.
 
-name = "miituber-landing"
+name = "miituber"
 compatibility_date = "2026-07-06"
 
 # Serve the site on the apex domain. custom_domain = true makes Cloudflare
