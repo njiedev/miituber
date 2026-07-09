@@ -752,6 +752,29 @@ select {
   border-top: 1px solid var(--border);
 }
 
+/* First-run resource gate: a hard, non-dismissable block over the library.
+   Sits above every other modal and the tour, with a heavier scrim. */
+#resource-gate {
+  z-index: 500;
+  background: rgba(12, 18, 26, 0.6);
+}
+
+.modal--resource-gate {
+  width: min(440px, 100%);
+}
+
+.resource-gate__steps {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.resource-gate__hint {
+  margin: 0;
+}
+
 .import-preview {
   display: grid;
   place-items: center;

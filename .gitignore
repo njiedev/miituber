@@ -27,9 +27,11 @@ docs/
 mee.ffsd
 mee*.miic
 
-# Nintendo FFL resource file — user-supplied, never redistribute
-AFLResHigh_2_3.dat
-public/AFLResHigh_2_3.dat
+# Nintendo FFL resource file — user-supplied, never redistribute.
+# Glob covers any location/suffix (public/, dist/, .bak, etc.).
+AFLResHigh_2_3.dat*
+**/AFLResHigh_2_3.dat*
+ffl_hires.dat*
 
 # Local render/debug artifacts
 output.png

@@ -347,6 +347,33 @@
           <div class="modal__footer" id="library-action-footer"></div>
         </div>
       </div>
+
+      <!-- First-run gate: AFLResHigh_2_3.dat is required before anything can
+           render, so this blocks the library until the user supplies it. No
+           close/cancel: it is mandatory. -->
+      <div class="modal-scrim" id="resource-gate" hidden>
+        <div class="modal modal--resource-gate" role="dialog" aria-modal="true" aria-labelledby="resource-gate-title">
+          <div class="modal__header">
+            <h2 id="resource-gate-title">One-time setup: add the Mii resource file</h2>
+          </div>
+          <div class="modal__body">
+            <p>
+              MiiTuber renders Miis with Nintendo's official Mii resource file,
+              <strong>AFLResHigh_2_3.dat</strong>. It can't be bundled for
+              copyright reasons, so add it once and you're set.
+            </p>
+            <ol class="resource-gate__steps">
+              <li>Download the Miitomo archive from the Internet Archive (the link is in the README on our GitHub page).</li>
+              <li>Unzip it to get <strong>AFLResHigh_2_3.dat</strong>.</li>
+              <li>Click below and select that file.</li>
+            </ol>
+            <p class="resource-gate__hint hint">Already have it from another Mii app (sometimes named <code>ffl_hires.dat</code>)? That works too.</p>
+          </div>
+          <div class="modal__footer">
+            <button class="btn btn--primary" id="resource-gate-pick" type="button">Choose file&hellip;</button>
+          </div>
+        </div>
+      </div>
     </main>
     <div id="tour-root" class="tour-root" aria-hidden="true" hidden></div>
   </body>
