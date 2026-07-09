@@ -6,7 +6,7 @@ Everything runs on your own PC. No accounts, no uploads, nothing sent anywhere.
 
 ## Download
 
-**[⬇ Download the latest release](https://github.com/njiedoescs/miituber/releases/latest)** (Windows)
+**[⬇ Download the latest release](https://github.com/njiedev/miituber/releases/latest)** (Windows)
 
 Download, run it, and follow the one-time setup below.
 
@@ -49,14 +49,14 @@ Then import the file in MiiTuber and it's saved to your library.
 
 ## Bugs & feedback
 
-Found a bug or have a request? [Open an issue](https://github.com/njiedoescs/miituber/issues) or reach out on Twitter: [@3weeksbuilding](https://twitter.com/3weeksbuilding).
+Found a bug or have a request? [Open an issue](https://github.com/njiedev/miituber/issues) or reach out on Twitter: [@3weeksbuilding](https://twitter.com/3weeksbuilding).
 
 ## Building from source
 
 For developers. Regular users can ignore this. You'll need [Node.js](https://nodejs.org) 20+ and the [Rust toolchain](https://rustup.rs).
 
 ```powershell
-git clone https://github.com/njiedoescs/miituber
+git clone https://github.com/njiedev/miituber
 cd miituber
 npm install
 # put AFLResHigh_2_3.dat (see above) in public/
