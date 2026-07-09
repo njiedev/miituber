@@ -107,10 +107,6 @@
               <input id="transparent-background" type="checkbox" />
               Transparent background
             </label>
-            <label class="check">
-              <input id="debug-materials" type="checkbox" />
-              Debug geometry colors
-            </label>
           </div>
 
           <!-- Camera -->
@@ -190,49 +186,6 @@
               <h2>Advanced tuning &amp; debug</h2>
               <button class="menu-popover__close" type="button" data-close="advanced">&times;</button>
             </div>
-            <dl class="tracking-debug" aria-label="Tracking debug values">
-              <div>
-                <dt>Expression</dt>
-                <dd id="debug-expression">0</dd>
-              </div>
-              <div>
-                <dt>Channels</dt>
-                <dd id="debug-channels">eyes open, mouth closed, emotion normal</dd>
-              </div>
-              <div>
-                <dt>Head</dt>
-                <dd id="debug-head-rotation">0 / 0 / 0</dd>
-              </div>
-              <div>
-                <dt>FPS</dt>
-                <dd id="debug-tracking-fps">0</dd>
-              </div>
-              <div>
-                <dt>Render</dt>
-                <dd id="debug-render-fps">0</dd>
-              </div>
-              <div>
-                <dt>Detect</dt>
-                <dd id="debug-detect-ms">0 ms</dd>
-              </div>
-              <div>
-                <dt>Scores</dt>
-                <dd id="debug-expression-scores">smile 0.00, mouth 0.00</dd>
-              </div>
-              <div>
-                <dt>Top inputs</dt>
-                <dd id="debug-top-blendshapes">none</dd>
-              </div>
-              <div>
-                <dt>Hold</dt>
-                <dd>
-                  <span id="debug-hold-ms">0 ms</span>
-                  <span class="hold-meter" aria-hidden="true">
-                    <span id="debug-hold-meter"></span>
-                  </span>
-                </dd>
-              </div>
-            </dl>
             <div class="tuning-panel" aria-label="Expression tuning controls">
               <div class="tuning-panel__header">
                 <h2>Tuning profile</h2>
@@ -256,18 +209,12 @@
                 <div class="tuning-section__header">
                   <h3>Smoothing</h3>
                 </div>
+                <span class="hint">Steadies head tracking. Raise it if your Mii looks jittery, lower it if it feels laggy.</span>
                 <div class="filter-controls">
-                  <label>
-                    Min cutoff
-                    <input id="one-euro-min-cutoff" type="number" min="0.01" step="0.01" />
-                  </label>
-                  <label>
-                    Beta
-                    <input id="one-euro-beta" type="number" min="0" step="0.01" />
-                  </label>
-                  <label>
-                    Derivative cutoff
-                    <input id="one-euro-derivative-cutoff" type="number" min="0.01" step="0.01" />
+                  <label class="range-field filter-controls__wide">
+                    <span>Smoothing</span>
+                    <input id="one-euro-smoothing" type="range" min="0" max="100" step="1" />
+                    <output id="one-euro-smoothing-value" for="one-euro-smoothing">50%</output>
                   </label>
                   <label>
                     Min hold ms
@@ -302,13 +249,62 @@
                 <div id="signal-tuning-controls" class="signal-tuning-controls"></div>
               </div>
             </div>
-            <div class="blendshape-debug" aria-label="All raw and smoothed blendshape values">
-              <div class="blendshape-debug__header">
-                <h2>Blendshapes</h2>
-                <span id="debug-blendshape-count">0 / 52</span>
-              </div>
-              <div id="debug-blendshape-bars" class="blendshape-bars">
-                Start tracking to inspect raw vs smoothed MediaPipe face sliders.
+            <label class="check debug-info-toggle">
+              <input id="show-debug-info" type="checkbox" />
+              Show debug info
+            </label>
+            <div id="advanced-debug-info" class="advanced-debug-info" hidden>
+              <dl class="tracking-debug" aria-label="Tracking debug values">
+                <div>
+                  <dt>Expression</dt>
+                  <dd id="debug-expression">0</dd>
+                </div>
+                <div>
+                  <dt>Channels</dt>
+                  <dd id="debug-channels">eyes open, mouth closed, emotion normal</dd>
+                </div>
+                <div>
+                  <dt>Head</dt>
+                  <dd id="debug-head-rotation">0 / 0 / 0</dd>
+                </div>
+                <div>
+                  <dt>FPS</dt>
+                  <dd id="debug-tracking-fps">0</dd>
+                </div>
+                <div>
+                  <dt>Render</dt>
+                  <dd id="debug-render-fps">0</dd>
+                </div>
+                <div>
+                  <dt>Detect</dt>
+                  <dd id="debug-detect-ms">0 ms</dd>
+                </div>
+                <div>
+                  <dt>Scores</dt>
+                  <dd id="debug-expression-scores">smile 0.00, mouth 0.00</dd>
+                </div>
+                <div>
+                  <dt>Top inputs</dt>
+                  <dd id="debug-top-blendshapes">none</dd>
+                </div>
+                <div>
+                  <dt>Hold</dt>
+                  <dd>
+                    <span id="debug-hold-ms">0 ms</span>
+                    <span class="hold-meter" aria-hidden="true">
+                      <span id="debug-hold-meter"></span>
+                    </span>
+                  </dd>
+                </div>
+              </dl>
+              <div class="blendshape-debug" aria-label="All raw and smoothed blendshape values">
+                <div class="blendshape-debug__header">
+                  <h2>Blendshapes</h2>
+                  <span id="debug-blendshape-count">0 / 52</span>
+                </div>
+                <div id="debug-blendshape-bars" class="blendshape-bars">
+                  Start tracking to inspect raw vs smoothed MediaPipe face sliders.
+                </div>
               </div>
             </div>
           </div>
@@ -339,6 +335,16 @@
             <button class="btn btn--primary" id="import-save" type="button" disabled>Save Avatar</button>
             <button class="btn" id="import-cancel" type="button">Cancel</button>
           </div>
+        </div>
+      </div>
+      <div class="modal-scrim" id="library-action-modal" hidden>
+        <div class="modal modal--library-action" role="dialog" aria-modal="true" aria-labelledby="library-action-title">
+          <div class="modal__header">
+            <h2 id="library-action-title">Avatar</h2>
+            <button class="modal__close" id="library-action-close" type="button">&times;</button>
+          </div>
+          <div class="modal__body" id="library-action-body"></div>
+          <div class="modal__footer" id="library-action-footer"></div>
         </div>
       </div>
     </main>

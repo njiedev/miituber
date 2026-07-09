@@ -16,6 +16,19 @@
     "core:window:allow-set-focus",
     "core:window:allow-show",
     "core:webview:allow-get-all-webviews",
+    "dialog:allow-open",
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [{ "path": "$APPDATA" }]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "$APPDATA/AFLResHigh_2_3.dat" }]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "$APPDATA/AFLResHigh_2_3.dat" }]
+    },
     "opener:default",
     "updater:default",
     "process:allow-restart"
