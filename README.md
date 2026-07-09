@@ -47,6 +47,8 @@ Then import the file in MiiTuber and it's saved to your library.
 2. In OBS, add a **Window Capture** source and select the MiiTuber window.
 3. Your Mii now floats over your scene. No green screen needed.
 
+> **Don't minimize the window while streaming.** OBS can't capture a minimized window, so your Mii will disappear from your scene. It's fine if the window is hidden behind other windows or moved off to the side. Just keep it open, not minimized.
+
 ## Bugs & feedback
 
 Found a bug or have a request? [Open an issue](https://github.com/njiedev/miituber/issues) or reach out on Twitter: [@3weeksbuilding](https://twitter.com/3weeksbuilding).

@@ -104,6 +104,13 @@ export const TOUR_CHAPTERS: Record<TourChapterId, TourChapter> = {
         highlight: "Window Capture",
       },
       {
+        id: "ws-no-minimize",
+        target: "#isolate-capture-button",
+        emotion: "surprised",
+        text: "One heads-up: don't minimize the Clean View window while streaming. OBS can't capture a minimized window, so your Mii will vanish. Keep it open (even hidden behind other windows) and you're set.",
+        highlight: "don't minimize",
+      },
+      {
         id: "ws-done",
         target: null,
         emotion: "wink",

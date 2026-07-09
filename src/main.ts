@@ -51,6 +51,22 @@ async function getFflContext(): Promise<FFLContext> {
   return fflContextPromise;
 }
 
+// Warm the FFL renderer at launch so the first-run "choose AFLResHigh_2_3.dat"
+// prompt lands on the reachable main-window toast. If we defer this until the
+// first render (importing a Mii), the prompt fires while the import modal's
+// scrim (z-index 100) is covering the toast (z-index 30), so the user can
+// never see or click it — the app just looks stuck on "Rendering a preview...".
+// Prompting up front also matches the documented first-run behaviour and
+// warms the WASM before the user needs it.
+async function prewarmFflRenderer(): Promise<void> {
+  if (!USE_FFL_JS) return;
+  try {
+    await getFflContext();
+  } catch (error) {
+    console.error("[MiiTuber] FFL renderer warm-up failed", error);
+  }
+}
+
 async function loadFflResource(): Promise<ArrayBuffer> {
   if (!isRunningInTauri()) {
     return (await fetch(FFL_RESOURCE_URL)).arrayBuffer();
@@ -103,12 +119,16 @@ async function tryFetchPublicFflResource(): Promise<ArrayBuffer | null> {
   }
 }
 
+// The Mii resource file is a hard prerequisite: without AFLResHigh_2_3.dat the
+// app can't render anything, so a new user can't even add their first Mii (the
+// import flow renders a preview). So when it's missing we put up a blocking,
+// non-dismissable first-run gate OVER the library — the user must supply the
+// file before they can reach anything else.
 async function promptForFflResource(): Promise<ArrayBuffer> {
-  let message =
-    "MiiTuber needs AFLResHigh_2_3.dat before it can render Miis. Download the Miitomo archive from archive.org, unzip it, then choose the file.";
+  showResourceGate();
 
   while (true) {
-    await waitForFflResourceButton(message, "Choose file...");
+    await waitForResourceGatePick();
 
     const selectedPath = await openDialog({
       title: "Choose AFLResHigh_2_3.dat",
@@ -121,7 +141,7 @@ async function promptForFflResource(): Promise<ArrayBuffer> {
     });
 
     if (!selectedPath || Array.isArray(selectedPath)) {
-      message = `MiiTuber still needs the Mii resource file to render avatars. Download and unzip the Miitomo archive from archive.org, then choose ${FFL_RESOURCE_FILE_NAME}.`;
+      // No file chosen — keep the gate up and let them try again.
       continue;
     }
 
@@ -129,53 +149,41 @@ async function promptForFflResource(): Promise<ArrayBuffer> {
       const bytes = await readFile(selectedPath);
       validateFflResource(bytes);
       await installFflResource(bytes);
-      hideFflResourceButton();
+      hideResourceGate();
       setStatus("Mii resource file saved. Starting renderer...", "success");
       return toArrayBuffer(bytes);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      message = `That does not look like the Mii resource file: ${detail} Choose the unzipped ${FFL_RESOURCE_FILE_NAME} file from the Miitomo archive.`;
+      // Invalid file — keep the gate up (text-only, no red error) and let them
+      // choose again. Render-surface errors surface on the workspace status.
+      console.warn("[MiiTuber] rejected Mii resource file", { error });
     }
   }
 }
 
-async function waitForFflResourceButton(
-  message: string,
-  buttonLabel: string,
-): Promise<void> {
-  setStatus(message, "error");
+function showResourceGate(): void {
+  const gate = document.querySelector<HTMLElement>("#resource-gate");
+  if (gate) gate.hidden = false;
+}
 
-  const button = getFflResourceButton();
-  button.textContent = buttonLabel;
-  button.hidden = false;
+function hideResourceGate(): void {
+  const gate = document.querySelector<HTMLElement>("#resource-gate");
+  if (gate) gate.hidden = true;
+  const error = document.querySelector<HTMLElement>("#resource-gate-error");
+  if (error) error.hidden = true;
+}
 
+// Resolves when the user clicks the gate's "Choose file" button. Re-enables the
+// button on each loop and disables it while the OS file dialog is open so a
+// double-click can't stack dialogs.
+async function waitForResourceGatePick(): Promise<void> {
+  const button =
+    document.querySelector<HTMLButtonElement>("#resource-gate-pick");
+  if (!button) return;
+  button.disabled = false;
   await new Promise<void>((resolve) => {
     button.addEventListener("click", () => resolve(), { once: true });
   });
-}
-
-function getFflResourceButton(): HTMLButtonElement {
-  let button = document.querySelector<HTMLButtonElement>("#ffl-resource-pick");
-  if (button) return button;
-
-  button = document.createElement("button");
-  button.id = "ffl-resource-pick";
-  button.className = "status-action";
-  button.type = "button";
-  button.hidden = true;
-  button.setAttribute(
-    "aria-label",
-    "Choose the Mii resource file AFLResHigh_2_3.dat",
-  );
-
-  const statusToastEl = document.querySelector<HTMLElement>(".status-toast");
-  statusToastEl?.append(button);
-  return button;
-}
-
-function hideFflResourceButton() {
-  const button = document.querySelector<HTMLButtonElement>("#ffl-resource-pick");
-  if (button) button.hidden = true;
+  button.disabled = true;
 }
 
 async function installFflResource(bytes: Uint8Array) {
@@ -760,10 +768,13 @@ function initializeMainWindow() {
   renderLibraryGrid();
   wireLibraryControls();
   wireTourControls();
-  startTourIfNeeded("library");
   void refreshCameraList();
   void checkForAppUpdateOnLaunch();
   void refreshMicrophoneList();
+  // Warm the renderer first: on first run this raises the blocking resource
+  // gate. Only once the gate is cleared (resource present) do we start the
+  // library tour, so the tour never appears behind the gate.
+  void prewarmFflRenderer().then(() => startTourIfNeeded("library"));
   void listen(CLEAN_OUTPUT_READY_EVENT, () => {
     void publishCleanOutputAvatarSnapshot();
   });
@@ -2662,8 +2673,13 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
   try {
     let loadResult;
     if (USE_FFL_JS) {
-      setStatus("Rendering with in-process FFL.js...");
+      // Resolve the FFL context FIRST. If AFLResHigh_2_3.dat is missing this
+      // blocks on the "choose the resource file" prompt, which owns the red
+      // status message + Choose-file button. Setting a "Rendering..." status
+      // before this resolves would clobber that prompt, leaving the user staring
+      // at a spinner with no idea they still need to pick the resource file.
       const ffl = await getFflContext();
+      setStatus("Rendering with in-process FFL.js...");
       loadResult = await avatarScene.loadModelFromMiiBytes(
         normalizeMiiBytes(new Uint8Array(miiBytes)),
         ffl,
