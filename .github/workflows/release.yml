@@ -17,12 +17,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows installer (.exe/.msi) — your users' platform.
+          # Windows installer (.exe/.msi) — the only supported platform.
+          # MiiTuber is intentionally Windows-only: its whole point is a
+          # transparent avatar captured into OBS, which relies on Windows
+          # window/game-capture with alpha. macOS (WKWebView) doesn't support
+          # that path — the same reason VSeeFace, VMagicMirror, and every other
+          # 3D webcam VTuber app is Windows-only. Don't re-add a mac build.
           - platform: "windows-latest"
             args: ""
-          # Apple-Silicon macOS build — so you can run it natively on your Mac.
-          - platform: "macos-latest"
-            args: "--target aarch64-apple-darwin"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -34,8 +36,6 @@ jobs:
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
