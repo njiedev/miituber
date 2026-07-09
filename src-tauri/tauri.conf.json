@@ -21,7 +21,8 @@
         "minHeight": 600,
         "resizable": true,
         "transparent": true,
-        "backgroundThrottling": "disabled"
+        "backgroundThrottling": "disabled",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --autoplay-policy=no-user-gesture-required --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling"
       },
       {
         "label": "clean-output",
@@ -36,7 +37,8 @@
         "transparent": true,
         "visible": false,
         "backgroundColor": "#00000000",
-        "backgroundThrottling": "disabled"
+        "backgroundThrottling": "disabled",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --autoplay-policy=no-user-gesture-required --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling"
       }
     ],
     "security": {

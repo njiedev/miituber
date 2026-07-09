@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo, listen } from "@tauri-apps/api/event";
+import { appDataDir, join } from "@tauri-apps/api/path";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
@@ -27,15 +30,18 @@ const USE_FFL_JS = true;
 // Bundled assets served from Vite's public/ dir.
 // NOTE: shipping should load a user-supplied .dat from disk instead of bundling
 // it (see docs/research/roadmap.md Phase 2 — do not redistribute Nintendo data).
+const FFL_RESOURCE_FILE_NAME = "AFLResHigh_2_3.dat";
 const FFL_RESOURCE_URL = "/AFLResHigh_2_3.dat";
 const FFL_WASM_URL = "/ffl-emscripten.wasm";
+const FFL_RESOURCE_MIN_BYTES = 1_000_000;
+const FFL_RESOURCE_MAX_BYTES = 16_000_000;
 
 let fflContextPromise: Promise<FFLContext> | null = null;
 
 async function getFflContext(): Promise<FFLContext> {
   if (!fflContextPromise) {
     fflContextPromise = (async () => {
-      const resource = await (await fetch(FFL_RESOURCE_URL)).arrayBuffer();
+      const resource = await loadFflResource();
       return ensureReady({ resource, wasmUrl: FFL_WASM_URL });
     })().catch((error) => {
       fflContextPromise = null;
@@ -43,6 +49,172 @@ async function getFflContext(): Promise<FFLContext> {
     });
   }
   return fflContextPromise;
+}
+
+async function loadFflResource(): Promise<ArrayBuffer> {
+  if (!isRunningInTauri()) {
+    return (await fetch(FFL_RESOURCE_URL)).arrayBuffer();
+  }
+
+  const installed = await tryReadInstalledFflResource();
+  if (installed) return toArrayBuffer(installed);
+
+  const publicResource = await tryFetchPublicFflResource();
+  if (publicResource) return publicResource;
+
+  return promptForFflResource();
+}
+
+function isRunningInTauri(): boolean {
+  return "__TAURI_INTERNALS__" in window;
+}
+
+async function tryReadInstalledFflResource(): Promise<Uint8Array | null> {
+  try {
+    const appDataPath = await fflResourceAppDataPath();
+    const bytes = await readFile(appDataPath);
+    validateFflResource(bytes);
+    console.info("[MiiTuber] loaded FFL resource from app data", {
+      path: appDataPath,
+      bytes: bytes.byteLength,
+    });
+    return bytes;
+  } catch (error) {
+    console.info("[MiiTuber] no usable app-data FFL resource found", { error });
+    return null;
+  }
+}
+
+async function tryFetchPublicFflResource(): Promise<ArrayBuffer | null> {
+  try {
+    const response = await fetch(FFL_RESOURCE_URL);
+    if (!response.ok) return null;
+
+    const bytes = await response.arrayBuffer();
+    validateFflResource(new Uint8Array(bytes));
+    console.info("[MiiTuber] loaded FFL resource from Vite public fallback", {
+      url: FFL_RESOURCE_URL,
+      bytes: bytes.byteLength,
+    });
+    return bytes;
+  } catch (error) {
+    console.info("[MiiTuber] no usable public FFL resource found", { error });
+    return null;
+  }
+}
+
+async function promptForFflResource(): Promise<ArrayBuffer> {
+  let message =
+    "MiiTuber needs AFLResHigh_2_3.dat before it can render Miis. Download the Miitomo archive from archive.org, unzip it, then choose the file.";
+
+  while (true) {
+    await waitForFflResourceButton(message, "Choose file...");
+
+    const selectedPath = await openDialog({
+      title: "Choose AFLResHigh_2_3.dat",
+      multiple: false,
+      directory: false,
+      filters: [
+        { name: "Mii resource file", extensions: ["dat"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+    });
+
+    if (!selectedPath || Array.isArray(selectedPath)) {
+      message = `MiiTuber still needs the Mii resource file to render avatars. Download and unzip the Miitomo archive from archive.org, then choose ${FFL_RESOURCE_FILE_NAME}.`;
+      continue;
+    }
+
+    try {
+      const bytes = await readFile(selectedPath);
+      validateFflResource(bytes);
+      await installFflResource(bytes);
+      hideFflResourceButton();
+      setStatus("Mii resource file saved. Starting renderer...", "success");
+      return toArrayBuffer(bytes);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      message = `That does not look like the Mii resource file: ${detail} Choose the unzipped ${FFL_RESOURCE_FILE_NAME} file from the Miitomo archive.`;
+    }
+  }
+}
+
+async function waitForFflResourceButton(
+  message: string,
+  buttonLabel: string,
+): Promise<void> {
+  setStatus(message, "error");
+
+  const button = getFflResourceButton();
+  button.textContent = buttonLabel;
+  button.hidden = false;
+
+  await new Promise<void>((resolve) => {
+    button.addEventListener("click", () => resolve(), { once: true });
+  });
+}
+
+function getFflResourceButton(): HTMLButtonElement {
+  let button = document.querySelector<HTMLButtonElement>("#ffl-resource-pick");
+  if (button) return button;
+
+  button = document.createElement("button");
+  button.id = "ffl-resource-pick";
+  button.className = "status-action";
+  button.type = "button";
+  button.hidden = true;
+  button.setAttribute(
+    "aria-label",
+    "Choose the Mii resource file AFLResHigh_2_3.dat",
+  );
+
+  const statusToastEl = document.querySelector<HTMLElement>(".status-toast");
+  statusToastEl?.append(button);
+  return button;
+}
+
+function hideFflResourceButton() {
+  const button = document.querySelector<HTMLButtonElement>("#ffl-resource-pick");
+  if (button) button.hidden = true;
+}
+
+async function installFflResource(bytes: Uint8Array) {
+  const appDataPath = await appDataDir();
+  await mkdir(appDataPath, { recursive: true });
+
+  const resourcePath = await fflResourceAppDataPath();
+  await writeFile(resourcePath, bytes);
+  console.info("[MiiTuber] installed FFL resource into app data", {
+    path: resourcePath,
+    bytes: bytes.byteLength,
+  });
+}
+
+async function fflResourceAppDataPath(): Promise<string> {
+  return join(await appDataDir(), FFL_RESOURCE_FILE_NAME);
+}
+
+function validateFflResource(bytes: Uint8Array) {
+  if (bytes.byteLength < FFL_RESOURCE_MIN_BYTES) {
+    throw new Error("the file is too small.");
+  }
+
+  if (bytes.byteLength > FFL_RESOURCE_MAX_BYTES) {
+    throw new Error("the file is much larger than expected.");
+  }
+
+  const hasFfraHeader =
+    bytes[0] === 0x46 && bytes[1] === 0x46 && bytes[2] === 0x52 && bytes[3] === 0x41;
+  if (!hasFfraHeader) {
+    throw new Error("it does not start with the expected FFRA resource header.");
+  }
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
 }
 import {
   FFL_EXPRESSION_LABELS,
@@ -93,6 +265,7 @@ const CLEAN_OUTPUT_WINDOW_LABEL = "clean-output";
 const CLEAN_OUTPUT_VIEW = "clean-output";
 const CLEAN_OUTPUT_AVATAR_STORAGE_KEY = "miituber.cleanOutputAvatar.v1";
 const BODY_VISIBLE_STORAGE_KEY = "miituber.bodyVisible.v1";
+const SHOW_DEBUG_INFO_STORAGE_KEY = "miituber.showDebugInfo.v1";
 const CLEAN_OUTPUT_AVATAR_EVENT = "clean-output-avatar";
 const CLEAN_OUTPUT_BACKGROUND_EVENT = "clean-output-background";
 const CLEAN_OUTPUT_POSE_EVENT = "clean-output-pose";
@@ -142,8 +315,6 @@ const emptyPreviewEl = document.querySelector<HTMLElement>(".empty-preview");
 const previewFrameEl = document.querySelector<HTMLElement>(".preview-frame");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
 const bodyVisibleInput = document.querySelector<HTMLInputElement>("#body-visible");
-const debugMaterialsInput =
-  document.querySelector<HTMLInputElement>("#debug-materials");
 const transparentBackgroundInput = document.querySelector<HTMLInputElement>(
   "#transparent-background",
 );
@@ -193,12 +364,16 @@ const loadProfileInput =
 const signalTuningControlsEl = document.querySelector<HTMLElement>(
   "#signal-tuning-controls",
 );
-const oneEuroMinCutoffInput = document.querySelector<HTMLInputElement>(
-  "#one-euro-min-cutoff",
+const oneEuroSmoothingInput = document.querySelector<HTMLInputElement>(
+  "#one-euro-smoothing",
 );
-const oneEuroBetaInput = document.querySelector<HTMLInputElement>("#one-euro-beta");
-const oneEuroDerivativeCutoffInput = document.querySelector<HTMLInputElement>(
-  "#one-euro-derivative-cutoff",
+const oneEuroSmoothingValueEl = document.querySelector<HTMLOutputElement>(
+  "#one-euro-smoothing-value",
+);
+const showDebugInfoInput =
+  document.querySelector<HTMLInputElement>("#show-debug-info");
+const advancedDebugInfoEl = document.querySelector<HTMLElement>(
+  "#advanced-debug-info",
 );
 const minimumHoldMsInput =
   document.querySelector<HTMLInputElement>("#minimum-hold-ms");
@@ -228,6 +403,16 @@ const lipSyncStatusEl = document.querySelector<HTMLElement>("#lip-sync-status");
 const debugLipSyncMouthEl = document.querySelector<HTMLElement>(
   "#debug-lip-sync-mouth",
 );
+const libraryActionModal =
+  document.querySelector<HTMLElement>("#library-action-modal");
+const libraryActionTitle =
+  document.querySelector<HTMLElement>("#library-action-title");
+const libraryActionClose =
+  document.querySelector<HTMLButtonElement>("#library-action-close");
+const libraryActionBody =
+  document.querySelector<HTMLElement>("#library-action-body");
+const libraryActionFooter =
+  document.querySelector<HTMLElement>("#library-action-footer");
 let pendingImport: { bytes: number[]; thumbnailDataUrl: string | null } | null = null;
 let currentAvatarId: string | null = null;
 let avatarLoaded = false;
@@ -246,6 +431,14 @@ let latestCleanOutputPose: CleanOutputPosePayload = {
   expressionIndex: FFLExpression.Normal,
   headRotation: { pitch: 0, yaw: 0, roll: 0 },
 };
+// When the tracker loses the face, hold the last pose briefly (so blinks of
+// detection don't move the avatar), then ease the head back to neutral.
+// NOTE: must be declared before the module-level init call below runs
+// resetAvatarTrackingState(), which writes faceLostAt.
+const FACE_LOST_HOLD_MS = 1000;
+const FACE_LOST_EASE_TAU_MS = 700;
+let faceLostAt: number | null = null;
+let faceLostLastFrameAt = 0;
 let lipSyncContext: AudioContext | null = null;
 let lipSyncStream: MediaStream | null = null;
 let lipSyncAnimationId: number | null = null;
@@ -557,6 +750,7 @@ function initializeMainWindow() {
   populateTuningControls();
   updateAvatarBackground();
   initializeBodyVisibleToggle();
+  initializeDebugInfoToggle();
   resetAvatarTrackingState();
   setTrackingButtons();
   setOutputButtons();
@@ -923,13 +1117,6 @@ bodyVisibleInput?.addEventListener("change", () => {
   logRenderEvent("body visibility toggled", { visible });
 });
 
-debugMaterialsInput?.addEventListener("change", () => {
-  avatarScene.setDebugMaterials(debugMaterialsInput.checked);
-  logRenderEvent("debug materials toggled", {
-    enabled: debugMaterialsInput.checked,
-  });
-});
-
 transparentBackgroundInput?.addEventListener("change", () => {
   updateAvatarBackground();
   logRenderEvent("transparent background toggled", {
@@ -1049,26 +1236,15 @@ function populateTuningControls() {
     }
   }
 
-  oneEuroMinCutoffInput?.addEventListener("change", () => {
-    tuningProfile.oneEuro.minCutoff = positiveInputValue(
-      oneEuroMinCutoffInput,
-      tuningProfile.oneEuro.minCutoff,
+  oneEuroSmoothingInput?.addEventListener("input", () => {
+    tuningProfile.oneEuro = oneEuroParamsFromSmoothing(
+      clampNumber(oneEuroSmoothingInput.valueAsNumber, 0, 100),
     );
     applyTuningProfile(tuningProfile);
   });
-  oneEuroBetaInput?.addEventListener("change", () => {
-    tuningProfile.oneEuro.beta = nonNegativeInputValue(
-      oneEuroBetaInput,
-      tuningProfile.oneEuro.beta,
-    );
-    applyTuningProfile(tuningProfile);
-  });
-  oneEuroDerivativeCutoffInput?.addEventListener("change", () => {
-    tuningProfile.oneEuro.derivativeCutoff = positiveInputValue(
-      oneEuroDerivativeCutoffInput,
-      tuningProfile.oneEuro.derivativeCutoff,
-    );
-    applyTuningProfile(tuningProfile);
+  showDebugInfoInput?.addEventListener("change", () => {
+    setDebugInfoVisible(showDebugInfoInput.checked);
+    writeShowDebugInfoPreference(showDebugInfoInput.checked);
   });
   minimumHoldMsInput?.addEventListener("change", () => {
     tuningProfile.minimumHoldMs = nonNegativeInputValue(
@@ -1206,14 +1382,12 @@ function applyTuningProfile(profile: TuningProfile) {
 }
 
 function renderTuningControls() {
-  if (oneEuroMinCutoffInput) {
-    oneEuroMinCutoffInput.value = String(tuningProfile.oneEuro.minCutoff);
+  const smoothing = smoothingFromOneEuroParams(tuningProfile.oneEuro);
+  if (oneEuroSmoothingInput) {
+    oneEuroSmoothingInput.value = String(smoothing);
   }
-  if (oneEuroBetaInput) oneEuroBetaInput.value = String(tuningProfile.oneEuro.beta);
-  if (oneEuroDerivativeCutoffInput) {
-    oneEuroDerivativeCutoffInput.value = String(
-      tuningProfile.oneEuro.derivativeCutoff,
-    );
+  if (oneEuroSmoothingValueEl) {
+    oneEuroSmoothingValueEl.textContent = `${smoothing}%`;
   }
   if (minimumHoldMsInput) {
     minimumHoldMsInput.value = String(tuningProfile.minimumHoldMs);
@@ -1242,30 +1416,44 @@ function renderTuningControls() {
   renderSignalDebugState(latestExpressionScores, latestExpressionSignals);
 }
 
+function easeHeadTowardNeutral(now: number) {
+  if (faceLostAt === null) {
+    faceLostAt = now;
+    faceLostLastFrameAt = now;
+    return;
+  }
+  if (now - faceLostAt < FACE_LOST_HOLD_MS) {
+    faceLostLastFrameAt = now;
+    return;
+  }
+
+  const { expressionIndex, headRotation } = latestCleanOutputPose;
+  const { pitch, yaw, roll } = headRotation;
+  if (Math.max(Math.abs(pitch), Math.abs(yaw), Math.abs(roll)) < 0.1) return;
+
+  const dt = now - faceLostLastFrameAt;
+  faceLostLastFrameAt = now;
+  const keep = Math.exp(-dt / FACE_LOST_EASE_TAU_MS);
+  applyExpressionPose(expressionIndex, {
+    pitch: pitch * keep,
+    yaw: yaw * keep,
+    roll: roll * keep,
+  });
+}
+
 function handleTrackingFrame({ results, trackingFps, detectMs }: FaceTrackerFrame) {
   const blendshapes = results.faceBlendshapes?.[0]?.categories ?? [];
   const matrixData = results.facialTransformationMatrixes?.[0]?.data;
   const transformMatrix = matrixData ? new Float32Array(matrixData) : undefined;
 
   if (blendshapes.length === 0) {
-    const expressionIndex = applyExpressionPose(FFLExpression.Normal, {
-      pitch: 0,
-      yaw: 0,
-      roll: 0,
-    });
-    setDebugValues(
-      expressionIndex,
-      formatChannels({ eyes: "open", mouth: "closed", emotion: "normal" }),
-      0,
-      { pitch: 0, yaw: 0, roll: 0 },
-      trackingFps,
-      detectMs,
-    );
+    easeHeadTowardNeutral(performance.now());
     renderBlendshapeBars([]);
     setTrackingStatus("Tracking, but no face is currently detected.", "idle");
     return;
   }
 
+  faceLostAt = null;
   const now = performance.now();
   updateCalibrationSession(blendshapes, now);
   const pipelineFrame = expressionPipeline.processFrame(
@@ -1542,7 +1730,6 @@ function setCleanOutputMode(enabled: boolean) {
     updateAvatarBackground();
     requestAnimationFrame(() => {
       avatarScene.resize();
-      if (enabled) avatarScene.resetCameraView();
     });
     return;
   }
@@ -1581,10 +1768,11 @@ function setIsolateMode(enabled: boolean) {
     }
   }
 
+  // Keep the user's orbit/zoom — entering or leaving isolate mode should only
+  // change the background, never re-frame the camera.
   updateAvatarBackground();
   requestAnimationFrame(() => {
     avatarScene.resize();
-    if (enabled) avatarScene.resetCameraView();
   });
   logRenderEvent("capture isolate toggled", { enabled });
 }
@@ -1619,6 +1807,7 @@ function updateAvatarBackground() {
 }
 
 function resetAvatarTrackingState() {
+  faceLostAt = null;
   expressionPipeline.reset();
   const expressionIndex = applyExpressionPose(FFLExpression.Normal, {
     pitch: 0,
@@ -1676,12 +1865,46 @@ function renderSignalDebugState(
   }
 }
 
-function positiveInputValue(input: HTMLInputElement, fallback: number) {
-  return input.valueAsNumber > 0 ? input.valueAsNumber : fallback;
-}
-
 function nonNegativeInputValue(input: HTMLInputElement, fallback: number) {
   return input.valueAsNumber >= 0 ? input.valueAsNumber : fallback;
+}
+
+function oneEuroParamsFromSmoothing(percent: number): TuningProfile["oneEuro"] {
+  const t = clampNumber(percent, 0, 100) / 100;
+  return {
+    minCutoff: roundTo(4 - 8.25 * t + 4.5 * t * t, 3),
+    beta: roundTo(0.08 - 0.165 * t + 0.09 * t * t, 4),
+    derivativeCutoff: roundTo(3 - 5.4 * t + 2.8 * t * t, 3),
+  };
+}
+
+function smoothingFromOneEuroParams(params: TuningProfile["oneEuro"]) {
+  let bestPercent = 50;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let percent = 0; percent <= 100; percent += 1) {
+    const candidate = oneEuroParamsFromSmoothing(percent);
+    const distance =
+      normalizedDistance(params.minCutoff, candidate.minCutoff, 4) +
+      normalizedDistance(params.beta, candidate.beta, 0.08) +
+      normalizedDistance(params.derivativeCutoff, candidate.derivativeCutoff, 3);
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestPercent = percent;
+    }
+  }
+
+  return bestPercent;
+}
+
+function normalizedDistance(a: number, b: number, scale: number) {
+  return Math.abs(a - b) / scale;
+}
+
+function roundTo(value: number, digits: number) {
+  const scale = 10 ** digits;
+  return Math.round(value * scale) / scale;
 }
 
 function clampNumber(value: number, min: number, max: number) {
@@ -1712,6 +1935,21 @@ function readBodyVisiblePreference() {
   }
 }
 
+function readShowDebugInfoPreference() {
+  try {
+    const raw = localStorage.getItem(SHOW_DEBUG_INFO_STORAGE_KEY);
+    if (raw === null) return false;
+
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === "boolean" ? parsed : false;
+  } catch (error) {
+    console.warn("[MiiTuber] could not read debug info preference", {
+      error,
+    });
+    return false;
+  }
+}
+
 function writeBodyVisiblePreference(visible: boolean) {
   try {
     localStorage.setItem(BODY_VISIBLE_STORAGE_KEY, JSON.stringify(visible));
@@ -1722,10 +1960,30 @@ function writeBodyVisiblePreference(visible: boolean) {
   }
 }
 
+function writeShowDebugInfoPreference(visible: boolean) {
+  try {
+    localStorage.setItem(SHOW_DEBUG_INFO_STORAGE_KEY, JSON.stringify(visible));
+  } catch (error) {
+    console.warn("[MiiTuber] could not save debug info preference", {
+      error,
+      visible,
+    });
+  }
+}
+
 function initializeBodyVisibleToggle() {
   const visible = readBodyVisiblePreference();
   if (bodyVisibleInput) bodyVisibleInput.checked = visible;
   avatarScene.setBodyVisible(visible);
+}
+
+function initializeDebugInfoToggle() {
+  setDebugInfoVisible(readShowDebugInfoPreference());
+}
+
+function setDebugInfoVisible(visible: boolean) {
+  if (showDebugInfoInput) showDebugInfoInput.checked = visible;
+  if (advancedDebugInfoEl) advancedDebugInfoEl.hidden = !visible;
 }
 
 function wireTourControls() {
@@ -1888,13 +2146,7 @@ function createAvatarTile(avatar: LibraryAvatar) {
   renameBtn.textContent = "Rename";
   renameBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    const next = window.prompt("Rename avatar", avatar.name);
-    if (next === null) return;
-    renameAvatar(getLibraryStorage(), avatar.id, sanitizeName(next));
-    renderLibraryGrid();
-    if (currentAvatarId === avatar.id && workspaceAvatarNameEl) {
-      workspaceAvatarNameEl.textContent = sanitizeName(next);
-    }
+    void requestRenameAvatar(avatar);
   });
 
   const deleteBtn = document.createElement("button");
@@ -1902,20 +2154,155 @@ function createAvatarTile(avatar: LibraryAvatar) {
   deleteBtn.textContent = "Delete";
   deleteBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (!window.confirm(`Delete "${avatar.name}"?`)) return;
-    removeAvatar(getLibraryStorage(), avatar.id);
-    if (currentAvatarId === avatar.id) {
-      currentAvatarId = null;
-      if (tracking) stopTracking();
-      stopLipSync();
-      setAppMode("library");
-    }
-    renderLibraryGrid();
+    void requestDeleteAvatar(avatar);
   });
 
   menu.append(renameBtn, deleteBtn);
   tile.append(thumb, name, menu);
   return tile;
+}
+
+async function requestRenameAvatar(avatar: LibraryAvatar) {
+  const nextName = await openRenameAvatarModal(avatar.name);
+  if (nextName === null) return;
+
+  const sanitizedName = sanitizeName(nextName);
+  renameAvatar(getLibraryStorage(), avatar.id, sanitizedName);
+  renderLibraryGrid();
+  if (currentAvatarId === avatar.id && workspaceAvatarNameEl) {
+    workspaceAvatarNameEl.textContent = sanitizedName;
+  }
+}
+
+async function requestDeleteAvatar(avatar: LibraryAvatar) {
+  const confirmed = await openDeleteAvatarModal(avatar.name);
+  if (!confirmed) return;
+
+  removeAvatar(getLibraryStorage(), avatar.id);
+  if (currentAvatarId === avatar.id) {
+    currentAvatarId = null;
+    if (tracking) stopTracking();
+    stopLipSync();
+    setAppMode("library");
+  }
+  renderLibraryGrid();
+}
+
+function openRenameAvatarModal(currentName: string): Promise<string | null> {
+  return openLibraryActionModal<string | null>({
+    title: "Rename Avatar",
+    buildBody: () => {
+      const label = document.createElement("label");
+      label.className = "field";
+      label.textContent = "Name";
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = currentName;
+      input.autocomplete = "off";
+      label.append(input);
+
+      return { body: label, focusTarget: input, getValue: () => input.value };
+    },
+    confirmLabel: "Save",
+    confirmClassName: "btn btn--primary",
+  });
+}
+
+function openDeleteAvatarModal(name: string): Promise<boolean> {
+  return openLibraryActionModal<boolean>({
+    title: "Delete Avatar",
+    buildBody: () => {
+      const message = document.createElement("p");
+      message.className = "library-action-message";
+      message.textContent = `Delete "${name}"?`;
+      return { body: message, getValue: () => true };
+    },
+    confirmLabel: "Delete",
+    confirmClassName: "btn btn--danger",
+  }).then(Boolean);
+}
+
+type LibraryActionModalOptions<T> = {
+  title: string;
+  buildBody: () => {
+    body: HTMLElement;
+    focusTarget?: HTMLElement;
+    getValue: () => T;
+  };
+  confirmLabel: string;
+  confirmClassName: string;
+};
+
+function openLibraryActionModal<T>(
+  options: LibraryActionModalOptions<T>,
+): Promise<T | null> {
+  if (
+    !libraryActionModal ||
+    !libraryActionTitle ||
+    !libraryActionClose ||
+    !libraryActionBody ||
+    !libraryActionFooter
+  ) {
+    return Promise.resolve(null);
+  }
+
+  libraryActionTitle.textContent = options.title;
+  libraryActionBody.textContent = "";
+  libraryActionFooter.textContent = "";
+
+  const { body, focusTarget, getValue } = options.buildBody();
+  const cancelButton = document.createElement("button");
+  cancelButton.className = "btn";
+  cancelButton.type = "button";
+  cancelButton.textContent = "Cancel";
+
+  const confirmButton = document.createElement("button");
+  confirmButton.className = options.confirmClassName;
+  confirmButton.type = "button";
+  confirmButton.textContent = options.confirmLabel;
+
+  libraryActionBody.append(body);
+  libraryActionFooter.append(confirmButton, cancelButton);
+  libraryActionModal.hidden = false;
+
+  return new Promise<T | null>((resolve) => {
+    let settled = false;
+
+    const settle = (value: T | null) => {
+      if (settled) return;
+      settled = true;
+      libraryActionModal.hidden = true;
+      libraryActionClose.removeEventListener("click", onCancel);
+      cancelButton.removeEventListener("click", onCancel);
+      confirmButton.removeEventListener("click", onConfirm);
+      libraryActionModal.removeEventListener("click", onScrimClick);
+      window.removeEventListener("keydown", onKeyDown);
+      resolve(value);
+    };
+
+    const onCancel = () => settle(null);
+    const onConfirm = () => settle(getValue());
+    const onScrimClick = (event: MouseEvent) => {
+      if (event.target === libraryActionModal) onCancel();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        onConfirm();
+      }
+    };
+
+    libraryActionClose.addEventListener("click", onCancel);
+    cancelButton.addEventListener("click", onCancel);
+    confirmButton.addEventListener("click", onConfirm);
+    libraryActionModal.addEventListener("click", onScrimClick);
+    window.addEventListener("keydown", onKeyDown);
+    requestAnimationFrame(() => (focusTarget ?? confirmButton).focus());
+  });
 }
 
 function wireLibraryControls() {

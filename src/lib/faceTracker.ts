@@ -33,6 +33,9 @@ export class FaceTracker {
   private stream: MediaStream | null = null;
   private video: HTMLVideoElement | null = null;
   private animationFrameId: number | null = null;
+  private timeoutId: number | null = null;
+  private running = false;
+  private removeVisibilityListener: (() => void) | undefined;
   private lastFrameAt = 0;
   private lastDetectionAt = 0;
   private onVideoStopped: (() => void) | undefined;
@@ -41,7 +44,8 @@ export class FaceTracker {
     callbacks: FaceTrackerCallbacks,
     options: FaceTrackerStartOptions = {},
   ) {
-    if (this.animationFrameId !== null) return;
+    if (this.running) return;
+    this.running = true;
     this.onVideoStopped = callbacks.onVideoStopped;
 
     try {
@@ -61,14 +65,29 @@ export class FaceTracker {
 
     const minFrameIntervalMs = maxFpsToMinIntervalMs(options.maxFps ?? 30);
 
+    // rAF stops entirely while the window is minimized or the webview is
+    // considered hidden, which would freeze pose events to the clean-output
+    // window (and thus OBS). Timers keep firing there, so fall back to
+    // setTimeout whenever the document reports hidden.
+    const scheduleNextFrame = () => {
+      if (!this.running) return;
+      if (document.hidden) {
+        this.timeoutId = window.setTimeout(processFrame, minFrameIntervalMs);
+      } else {
+        this.animationFrameId = requestAnimationFrame(processFrame);
+      }
+    };
+
     const processFrame = () => {
-      if (!this.video || !this.faceLandmarker) return;
+      this.animationFrameId = null;
+      this.timeoutId = null;
+      if (!this.running || !this.video || !this.faceLandmarker) return;
 
       if (this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
         try {
           const now = performance.now();
           if (now - this.lastDetectionAt < minFrameIntervalMs) {
-            this.animationFrameId = requestAnimationFrame(processFrame);
+            scheduleNextFrame();
             return;
           }
 
@@ -91,16 +110,44 @@ export class FaceTracker {
         }
       }
 
-      this.animationFrameId = requestAnimationFrame(processFrame);
+      scheduleNextFrame();
     };
 
-    this.animationFrameId = requestAnimationFrame(processFrame);
+    scheduleNextFrame();
+
+    const handleVisibilityChange = () => {
+      // Swap the pending rAF for a timeout (or back) immediately, otherwise
+      // a frame already scheduled via rAF stays parked until the window is
+      // restored.
+      if (!this.running) return;
+      if (this.animationFrameId !== null) {
+        cancelAnimationFrame(this.animationFrameId);
+        this.animationFrameId = null;
+      }
+      if (this.timeoutId !== null) {
+        window.clearTimeout(this.timeoutId);
+        this.timeoutId = null;
+      }
+      scheduleNextFrame();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    this.removeVisibilityListener = () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
   }
 
   stop() {
+    this.running = false;
+    this.removeVisibilityListener?.();
+    this.removeVisibilityListener = undefined;
+
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
+    }
+
+    if (this.timeoutId !== null) {
+      window.clearTimeout(this.timeoutId);
+      this.timeoutId = null;
     }
 
     if (this.video) {
