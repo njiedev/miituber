@@ -1,0 +1,52 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+src-tauri/target
+*.local
+
+# Updater signing keypair — never commit; private key lives only on your machine + GitHub secret
+src-tauri/*.key*
+
+# Internal working files — kept locally, never published to the public repo
+CLAUDE.md
+CLAUDE non fable.md
+MYTODO.md
+docs/
+.claude/
+
+# Personal Mii fixtures used only by local dev/capture scripts
+mee.ffsd
+mee*.miic
+
+# Nintendo FFL resource file — user-supplied, never redistribute
+AFLResHigh_2_3.dat
+public/AFLResHigh_2_3.dat
+
+# Local render/debug artifacts
+output.png
+bridge/*.bin
+bridge/*.glb
+bridge/*.html
+bridge/*.json
+bridge/*.log
+bridge/*.png
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

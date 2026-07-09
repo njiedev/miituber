@@ -1,0 +1,66 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "miituber",
+  "version": "0.1.0",
+  "identifier": "com.thedr.miituber",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "miituber",
+        "width": 1024,
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "transparent": true,
+        "backgroundThrottling": "disabled"
+      },
+      {
+        "label": "clean-output",
+        "url": "/?view=clean-output",
+        "title": "MiiTuber OBS Clean View",
+        "width": 720,
+        "height": 720,
+        "minWidth": 320,
+        "minHeight": 320,
+        "resizable": true,
+        "decorations": true,
+        "transparent": true,
+        "visible": false,
+        "backgroundColor": "#00000000",
+        "backgroundThrottling": "disabled"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' http://127.0.0.1:5000 http://localhost:5000 https://cdn.jsdelivr.net https://storage.googleapis.com https://github.com https://objects.githubusercontent.com https://api.github.com; worker-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ0NDJENjc3RjY4MTMzMjUKUldRbE00SDJkOVpDUkVzMk8xcU4rU2M5bnJpdEtieVdBWE5GUzQ1TzJadDBiVG5ZZTZzQkJiQk8K",
+      "endpoints": [
+        "https://github.com/njiedev/miituber/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

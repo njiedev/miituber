@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="icon" type="image/svg+xml" href="/mii-favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiiTuber</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main class="app-shell mode-library">
+      <header class="appbar">
+        <div class="appbar-left">
+          <button id="back-to-library" class="tbtn workspace-only" type="button">
+            &lsaquo; Library
+          </button>
+          <strong class="app-name">MiiTuber</strong>
+          <span class="app-disclaimer">(not affiliated with Nintendo)</span>
+          <span class="avatar-name workspace-only" id="workspace-avatar-name"></span>
+        </div>
+
+        <div class="appbar-right">
+          <label class="check appbar-toggle workspace-only">
+            <input id="body-visible" type="checkbox" checked />
+            Show body
+          </label>
+          <button
+            id="tour-replay-button"
+            class="tbtn tour-replay-button"
+            type="button"
+            title="Replay guided tour"
+            aria-label="Replay guided tour"
+          >
+            ?
+          </button>
+          <button id="start-tracking-button" class="tbtn workspace-only" type="button" disabled>
+            Start Tracking
+          </button>
+          <button id="stop-tracking-button" class="tbtn workspace-only" type="button" disabled>
+            Stop Tracking
+          </button>
+          <button
+            id="isolate-capture-button"
+            class="checker-btn workspace-only"
+            type="button"
+            title="Clean capture: hide UI and go transparent for OBS (Esc to exit)"
+            aria-label="Clean capture transparent view"
+          ></button>
+        </div>
+      </header>
+
+      <div class="content">
+        <!-- Start screen: avatar library -->
+        <section class="library-screen" id="library-screen" aria-label="Avatar library">
+          <div class="library-grid" id="avatar-grid">
+            <button class="add-avatar-tile" id="add-avatar-tile" type="button">
+              <span class="add-avatar-plus" aria-hidden="true">+</span>
+              <span>Add Avatar</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Workspace: centered avatar + overlay controls -->
+        <section class="workspace" aria-label="Avatar workspace">
+          <nav class="side-rail" aria-label="Controls">
+            <button class="rail-item" type="button" data-menu="scene">Scene</button>
+            <button class="rail-item" type="button" data-menu="camera">Camera</button>
+            <button class="rail-item" type="button" data-menu="mic">Microphone</button>
+            <button class="rail-item" type="button" data-menu="hotkeys">Hotkeys</button>
+            <button class="rail-item" type="button" data-menu="advanced">Advanced</button>
+          </nav>
+
+          <section class="preview-panel" aria-label="Rendered avatar preview">
+            <div class="preview-frame">
+              <canvas id="mii-viewer" aria-label="Rendered Wii-style avatar model"></canvas>
+              <p class="empty-preview">Rendered 3D model appears here.</p>
+            </div>
+          </section>
+
+          <div class="status-toast">
+            <p id="status" data-tone="idle"></p>
+          </div>
+
+          <div class="isolate-hint" id="isolate-hint" aria-hidden="true">
+            Press <kbd>Esc</kbd> to go back
+          </div>
+
+          <!-- Scene -->
+          <div class="menu-popover" data-popover="scene" hidden>
+            <div class="menu-popover__header">
+              <h2>Scene</h2>
+              <button class="menu-popover__close" type="button" data-close="scene">&times;</button>
+            </div>
+            <label class="field">
+              Expression
+              <select id="expression-select" disabled>
+                <option value="0">0 Normal</option>
+              </select>
+            </label>
+            <label class="field">
+              Background color
+              <input id="background-color" type="color" value="#e8f0f7" />
+            </label>
+            <label class="check">
+              <input id="transparent-background" type="checkbox" />
+              Transparent background
+            </label>
+            <label class="check">
+              <input id="debug-materials" type="checkbox" />
+              Debug geometry colors
+            </label>
+          </div>
+
+          <!-- Camera -->
+          <div class="menu-popover" data-popover="camera" hidden>
+            <div class="menu-popover__header">
+              <h2>Camera</h2>
+              <button class="menu-popover__close" type="button" data-close="camera">&times;</button>
+            </div>
+            <label class="field">
+              Device
+              <select id="camera-select" disabled>
+                <option value="">Default camera</option>
+              </select>
+            </label>
+            <label class="field">
+              Tracking FPS
+              <select id="tracking-fps-select">
+                <option value="24">24</option>
+                <option value="30">30</option>
+                <option value="60" selected>60</option>
+              </select>
+            </label>
+            <p id="tracking-status" data-tone="idle">Start tracking when you are ready.</p>
+            <p class="privacy-note">Camera and microphone stay on your device.</p>
+          </div>
+
+          <!-- Microphone -->
+          <div class="menu-popover" data-popover="mic" hidden>
+            <div class="menu-popover__header">
+              <h2>Microphone lip-sync</h2>
+              <button class="menu-popover__close" type="button" data-close="mic">&times;</button>
+            </div>
+            <label class="field">
+              Device
+              <select id="microphone-select">
+                <option value="">Default microphone</option>
+              </select>
+            </label>
+            <label class="field">
+              Mouth source
+              <select id="mouth-source-select">
+                <option value="max">Mic + camera</option>
+                <option value="mic">Mic only</option>
+                <option value="camera">Camera only</option>
+              </select>
+            </label>
+            <div class="btn-row">
+              <button id="start-lip-sync-button" class="btn" type="button">Start</button>
+              <button id="calibrate-lip-sync-button" class="btn" type="button" disabled>
+                Calibrate Silence
+              </button>
+              <button id="stop-lip-sync-button" class="btn" type="button" disabled>Stop</button>
+            </div>
+            <p id="lip-sync-status" data-tone="idle">
+              Optional. Camera jaw tracking works without it.
+            </p>
+            <dl class="output-debug" aria-label="Lip-sync value">
+              <div>
+                <dt>Mouth</dt>
+                <dd id="debug-lip-sync-mouth">0.00</dd>
+              </div>
+            </dl>
+          </div>
+
+<!-- Hotkeys -->
+          <div class="menu-popover" data-popover="hotkeys" hidden>
+            <div class="menu-popover__header">
+              <h2>Hotkeys</h2>
+              <button class="menu-popover__close" type="button" data-close="hotkeys">&times;</button>
+            </div>
+            <p class="coming-soon">Coming soon.</p>
+          </div>
+
+          <!-- Advanced tuning & debug -->
+          <div class="menu-popover menu-popover--wide" data-popover="advanced" hidden>
+            <div class="menu-popover__header">
+              <h2>Advanced tuning &amp; debug</h2>
+              <button class="menu-popover__close" type="button" data-close="advanced">&times;</button>
+            </div>
+            <dl class="tracking-debug" aria-label="Tracking debug values">
+              <div>
+                <dt>Expression</dt>
+                <dd id="debug-expression">0</dd>
+              </div>
+              <div>
+                <dt>Channels</dt>
+                <dd id="debug-channels">eyes open, mouth closed, emotion normal</dd>
+              </div>
+              <div>
+                <dt>Head</dt>
+                <dd id="debug-head-rotation">0 / 0 / 0</dd>
+              </div>
+              <div>
+                <dt>FPS</dt>
+                <dd id="debug-tracking-fps">0</dd>
+              </div>
+              <div>
+                <dt>Render</dt>
+                <dd id="debug-render-fps">0</dd>
+              </div>
+              <div>
+                <dt>Detect</dt>
+                <dd id="debug-detect-ms">0 ms</dd>
+              </div>
+              <div>
+                <dt>Scores</dt>
+                <dd id="debug-expression-scores">smile 0.00, mouth 0.00</dd>
+              </div>
+              <div>
+                <dt>Top inputs</dt>
+                <dd id="debug-top-blendshapes">none</dd>
+              </div>
+              <div>
+                <dt>Hold</dt>
+                <dd>
+                  <span id="debug-hold-ms">0 ms</span>
+                  <span class="hold-meter" aria-hidden="true">
+                    <span id="debug-hold-meter"></span>
+                  </span>
+                </dd>
+              </div>
+            </dl>
+            <div class="tuning-panel" aria-label="Expression tuning controls">
+              <div class="tuning-panel__header">
+                <h2>Tuning profile</h2>
+                <div class="tuning-actions">
+                  <button id="calibrate-button" type="button">Calibrate 2s</button>
+                  <button id="save-profile-button" type="button">Save JSON</button>
+                  <label class="load-profile-control">
+                    Load JSON
+                    <input id="load-profile-input" type="file" accept="application/json,.json" />
+                  </label>
+                </div>
+              </div>
+              <p id="calibration-status" data-tone="idle">
+                Calibration stores your neutral face baseline in the profile.
+              </p>
+              <p class="tuning-note">
+                Mouth enter/exit tunes camera jaw and mic lip-sync hysteresis. Min hold ms
+                controls expression switch hold time.
+              </p>
+              <div class="tuning-section">
+                <div class="tuning-section__header">
+                  <h3>Smoothing</h3>
+                </div>
+                <div class="filter-controls">
+                  <label>
+                    Min cutoff
+                    <input id="one-euro-min-cutoff" type="number" min="0.01" step="0.01" />
+                  </label>
+                  <label>
+                    Beta
+                    <input id="one-euro-beta" type="number" min="0" step="0.01" />
+                  </label>
+                  <label>
+                    Derivative cutoff
+                    <input id="one-euro-derivative-cutoff" type="number" min="0.01" step="0.01" />
+                  </label>
+                  <label>
+                    Min hold ms
+                    <input id="minimum-hold-ms" type="number" min="0" step="25" />
+                  </label>
+                </div>
+              </div>
+              <div class="tuning-section">
+                <div class="tuning-section__header">
+                  <h3>Mic lip-sync</h3>
+                </div>
+                <div class="filter-controls">
+                  <label>
+                    Mic noise floor
+                    <input id="lip-sync-noise-floor" type="number" min="0" max="0.5" step="0.005" />
+                  </label>
+                  <label>
+                    Speaking level
+                    <input id="lip-sync-speaking-level" type="number" min="0.001" max="1" step="0.005" />
+                  </label>
+                  <label>
+                    Mic smoothing
+                    <input id="lip-sync-smoothing" type="number" min="0" max="1" step="0.01" />
+                  </label>
+                </div>
+              </div>
+              <div class="tuning-section">
+                <div class="tuning-section__header">
+                  <h3>Expression signals</h3>
+                  <span>Enter, exit, and gain</span>
+                </div>
+                <div id="signal-tuning-controls" class="signal-tuning-controls"></div>
+              </div>
+            </div>
+            <div class="blendshape-debug" aria-label="All raw and smoothed blendshape values">
+              <div class="blendshape-debug__header">
+                <h2>Blendshapes</h2>
+                <span id="debug-blendshape-count">0 / 52</span>
+              </div>
+              <div id="debug-blendshape-bars" class="blendshape-bars">
+                Start tracking to inspect raw vs smoothed MediaPipe face sliders.
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Import popup -->
+      <div class="modal-scrim" id="import-modal" hidden>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
+          <div class="modal__header">
+            <h2 id="import-title">Add Avatar</h2>
+            <button class="modal__close" id="import-close" type="button">&times;</button>
+          </div>
+          <div class="modal__body">
+            <div class="import-preview" id="import-preview">
+              <span>No file selected</span>
+            </div>
+            <button class="btn" id="import-pick" type="button">Choose file&hellip;</button>
+            <input id="mii-file" type="file" accept=".ffsd,.miic,.bin,.dat" />
+            <span class="hint">.ffsd, Wii, or Mii Studio data (legacy .miic only)</span>
+            <label class="field">
+              Name
+              <input id="import-name" type="text" placeholder="Avatar name" disabled />
+            </label>
+            <p id="import-status" data-tone="idle"></p>
+          </div>
+          <div class="modal__footer">
+            <button class="btn btn--primary" id="import-save" type="button" disabled>Save Avatar</button>
+            <button class="btn" id="import-cancel" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </main>
+    <div id="tour-root" class="tour-root" aria-hidden="true" hidden></div>
+  </body>
+</html>
