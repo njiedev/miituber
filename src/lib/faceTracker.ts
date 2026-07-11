@@ -166,9 +166,17 @@ export class FaceTracker {
     this.lastDetectionAt = 0;
   }
 
-  async listCameras(): Promise<CameraDevice[]> {
+  async listCameras(requestPermission = false): Promise<CameraDevice[]> {
     if (!navigator.mediaDevices?.enumerateDevices) {
       return [];
+    }
+
+    if (requestPermission && !this.running) {
+      const permissionStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+      permissionStream.getTracks().forEach((track) => track.stop());
     }
 
     const devices = await navigator.mediaDevices.enumerateDevices();

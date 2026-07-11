@@ -768,6 +768,9 @@ function initializeMainWindow() {
   renderLibraryGrid();
   wireLibraryControls();
   wireTourControls();
+  navigator.mediaDevices?.addEventListener("devicechange", () => {
+    void refreshCameraList();
+  });
   void refreshCameraList();
   void checkForAppUpdateOnLaunch();
   void refreshMicrophoneList();
@@ -1039,11 +1042,13 @@ function populateExpressionSelect() {
   expressionSelect.value = String(FFLExpression.Normal);
 }
 
-async function refreshCameraList() {
+async function refreshCameraList(requestPermission = false) {
   if (!cameraSelect) return;
 
+  const selectedDeviceId = cameraSelect.value;
+
   try {
-    const cameras = await faceTracker.listCameras();
+    const cameras = await faceTracker.listCameras(requestPermission);
     cameraSelect.textContent = "";
 
     const defaultOption = document.createElement("option");
@@ -1058,6 +1063,9 @@ async function refreshCameraList() {
       cameraSelect.append(option);
     }
 
+    if (cameras.some((camera) => camera.deviceId === selectedDeviceId)) {
+      cameraSelect.value = selectedDeviceId;
+    }
     cameraSelect.disabled = cameras.length === 0;
     logRenderEvent("camera list refreshed", { count: cameras.length });
   } catch (error) {
@@ -2357,6 +2365,9 @@ function wireLibraryControls() {
         );
         bringPopoverToFront(popover);
         makePopoverDraggable(popover);
+        if (name === "camera") {
+          void refreshCameraList(true);
+        }
       } else {
         popover.hidden = true;
       }
