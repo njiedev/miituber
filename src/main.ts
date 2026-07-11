@@ -1071,7 +1071,7 @@ async function refreshCameraList() {
     if (cameras.some((camera) => camera.deviceId === selectedDeviceId)) {
       cameraSelect.value = selectedDeviceId;
     }
-    cameraSelect.disabled = cameras.length === 0;
+    cameraSelect.disabled = false;
     logRenderEvent("camera list refreshed", { count: cameras.length });
   } catch (error) {
     if (refreshSequence !== cameraRefreshSequence) return;
@@ -2371,6 +2371,9 @@ function wireLibraryControls() {
         );
         bringPopoverToFront(popover);
         makePopoverDraggable(popover);
+        if (name === "camera") {
+          void refreshCameraList();
+        }
       } else {
         popover.hidden = true;
       }
