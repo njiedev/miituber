@@ -768,6 +768,9 @@ function initializeMainWindow() {
   renderLibraryGrid();
   wireLibraryControls();
   wireTourControls();
+  navigator.mediaDevices?.addEventListener("devicechange", () => {
+    void refreshCameraList();
+  });
   void refreshCameraList();
   void checkForAppUpdateOnLaunch();
   void refreshMicrophoneList();
@@ -1039,11 +1042,18 @@ function populateExpressionSelect() {
   expressionSelect.value = String(FFLExpression.Normal);
 }
 
+let cameraRefreshSequence = 0;
+
 async function refreshCameraList() {
   if (!cameraSelect) return;
 
+  const refreshSequence = ++cameraRefreshSequence;
+  const selectedDeviceId = cameraSelect.value;
+
   try {
     const cameras = await faceTracker.listCameras();
+    if (refreshSequence !== cameraRefreshSequence) return;
+
     cameraSelect.textContent = "";
 
     const defaultOption = document.createElement("option");
@@ -1058,10 +1068,14 @@ async function refreshCameraList() {
       cameraSelect.append(option);
     }
 
-    cameraSelect.disabled = cameras.length === 0;
+    if (cameras.some((camera) => camera.deviceId === selectedDeviceId)) {
+      cameraSelect.value = selectedDeviceId;
+    }
+    cameraSelect.disabled = false;
     logRenderEvent("camera list refreshed", { count: cameras.length });
   } catch (error) {
-    cameraSelect.disabled = true;
+    if (refreshSequence !== cameraRefreshSequence) return;
+    cameraSelect.disabled = cameraSelect.options.length <= 1;
     const message = error instanceof Error ? error.message : String(error);
     console.warn("[MiiTuber] camera list refresh failed", { error, message });
   }
@@ -2357,6 +2371,9 @@ function wireLibraryControls() {
         );
         bringPopoverToFront(popover);
         makePopoverDraggable(popover);
+        if (name === "camera") {
+          void refreshCameraList();
+        }
       } else {
         popover.hidden = true;
       }
