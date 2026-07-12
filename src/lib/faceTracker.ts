@@ -39,6 +39,7 @@ export class FaceTracker {
   private lastFrameAt = 0;
   private lastDetectionAt = 0;
   private onVideoStopped: (() => void) | undefined;
+  private permissionPrimeAttempted = false;
 
   async start(
     callbacks: FaceTrackerCallbacks,
@@ -166,12 +167,40 @@ export class FaceTracker {
     this.lastDetectionAt = 0;
   }
 
-  async listCameras(): Promise<CameraDevice[]> {
+  async listCameras(
+    options: { primePermission?: boolean } = {},
+  ): Promise<CameraDevice[]> {
     if (!navigator.mediaDevices?.enumerateDevices) {
       return [];
     }
 
-    const devices = await navigator.mediaDevices.enumerateDevices();
+    let devices = await navigator.mediaDevices.enumerateDevices();
+
+    // Until the origin has camera permission, Chromium only exposes
+    // placeholder devices with empty deviceIds. Prompt once so the real
+    // list becomes visible.
+    const onlyPlaceholders = devices
+      .filter((device) => device.kind === "videoinput")
+      .every((device) => !device.deviceId);
+
+    if (
+      options.primePermission &&
+      onlyPlaceholders &&
+      !this.permissionPrimeAttempted &&
+      navigator.mediaDevices.getUserMedia
+    ) {
+      this.permissionPrimeAttempted = true;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+        stream.getTracks().forEach((track) => track.stop());
+        devices = await navigator.mediaDevices.enumerateDevices();
+      } catch {
+        // Permission denied or no camera; fall through with what we have.
+      }
+    }
+
     let cameraNumber = 1;
 
     return devices
