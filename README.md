@@ -17,6 +17,8 @@ Download, run it, and follow the one-time setup below.
 
 Miis are rendered using Nintendo's official Mii models and textures, which come in a single file called `AFLResHigh_2_3.dat`. MiiTuber can't include this file for copyright reasons, so you grab it yourself. It takes about a minute:
 
+> **Legal notice:** You are responsible for legally obtaining and using any resource or Mii data files required by MiiTuber. Only use files that you own or otherwise have the legal right to access. MiiTuber does not provide these files or grant any rights to third-party content.
+
 1. **Download the file** from the Internet Archive (it's from Miitomo, Nintendo's old mobile app):
    <https://web.archive.org/web/20180502054513/http://download-cdn.miitomo.com/native/20180125111639/android/v2/asset_model_character_mii_AFLResHigh_2_3_dat.zip>
 2. **Unzip it.** Inside is a file named `AFLResHigh_2_3.dat`.
