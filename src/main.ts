@@ -1044,14 +1044,14 @@ function populateExpressionSelect() {
 
 let cameraRefreshSequence = 0;
 
-async function refreshCameraList() {
+async function refreshCameraList(options: { primePermission?: boolean } = {}) {
   if (!cameraSelect) return;
 
   const refreshSequence = ++cameraRefreshSequence;
   const selectedDeviceId = cameraSelect.value;
 
   try {
-    const cameras = await faceTracker.listCameras();
+    const cameras = await faceTracker.listCameras(options);
     if (refreshSequence !== cameraRefreshSequence) return;
 
     cameraSelect.textContent = "";
@@ -2372,7 +2372,7 @@ function wireLibraryControls() {
         bringPopoverToFront(popover);
         makePopoverDraggable(popover);
         if (name === "camera") {
-          void refreshCameraList();
+          void refreshCameraList({ primePermission: true });
         }
       } else {
         popover.hidden = true;
