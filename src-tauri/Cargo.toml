@@ -1,6 +1,6 @@
 [package]
 name = "miituber"
-version = "0.1.1"
+version = "0.1.2"
 description = "Turn your Mii into a VTuber avatar with webcam face tracking"
 authors = ["Mohammed Njie"]
 license = "AGPL-3.0-only"
