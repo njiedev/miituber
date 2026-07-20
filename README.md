@@ -2,6 +2,9 @@
 
 <img width="1280" height="310" alt="New Project (1)" src="https://github.com/user-attachments/assets/047e1588-3a1e-4478-ae4e-c9119f5ce943" />
 
+NOTE: Mii Creator(mii.nxw.pw) custom clothes currently do not work with Miituber.
+
+
 Turn your **Mii** into a VTuber. MiiTuber shows your Mii as a live 3D avatar that copies your head movements from your webcam and moves its mouth when you talk, ready to drop into OBS with a transparent background.
 
 Everything runs on your own PC. No accounts, no uploads, nothing sent anywhere.
@@ -10,8 +13,6 @@ Everything runs on your own PC. No accounts, no uploads, nothing sent anywhere.
 ## Download
 
 **[⬇ Download the latest release](https://github.com/njiedev/miituber/releases/latest)** (Windows)
-
-[**Build from source**](#macos) (MacOS)
 
 Download, run it, and follow the one-time setup below.
 
