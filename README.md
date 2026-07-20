@@ -55,6 +55,21 @@ Then import the file in MiiTuber and it's saved to your library.
 
 > **Don't minimize the window while streaming.** OBS can't capture a minimized window, so your Mii will disappear from your scene. It's fine if the window is hidden behind other windows or moved off to the side. Just keep it open, not minimized.
 
+## MacOS
+
+MacOS users currently must build MiiTuber from source. Install [Node.js](https://nodejs.org) 20+, the [Rust toolchain](https://rustup.rs), and the Xcode command-line tools, then run:
+
+```bash
+xcode-select --install
+git clone https://github.com/njiedev/miituber.git
+cd miituber
+npm install
+# Put AFLResHigh_2_3.dat in public/
+npm run tauri build
+```
+
+Note that the **transparent background** feature does not work on MacOS. As a workaround, set MiiTuber's background to solid green, blue, or magenta, capture the MiiTuber window in OBS, and add OBS's **Chroma Key** filter to remove that color.
+
 ## Bugs & feedback
 
 Found a bug or have a request? [Open an issue](https://github.com/njiedev/miituber/issues) or reach out on Twitter: [@3weeksbuilding](https://twitter.com/3weeksbuilding).
