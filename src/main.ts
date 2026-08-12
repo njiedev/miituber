@@ -1143,9 +1143,9 @@ function initializeUpdateDevControls() {
     if (state === "available") showTestAvailableUpdate();
     if (state === "downloading") showDownloadingUpdate(35);
     if (state === "installing") showInstallingUpdate();
-    if (state === "ready") showReadyToRestart("0.1.3");
+    if (state === "ready") showReadyToRestart("0.2.0");
     if (state === "error") showUpdateError(null, "Test error: nothing was changed.");
-    if (state === "whats-new") showWhatsNewIfNeeded("0.1.3", "0.1.2");
+    if (state === "whats-new") showWhatsNewIfNeeded("0.2.0", "0.1.2");
     if (state === "clear-seen") {
       localStorage.removeItem(LAST_SEEN_RELEASE_NOTES_KEY);
       button.textContent = "Cleared!";
@@ -1156,7 +1156,7 @@ function initializeUpdateDevControls() {
 
 function showTestAvailableUpdate() {
   resetUpdateModal();
-  setUpdateModalCopy("A New Update is Available!", "MiiTuber 0.1.3 is ready. Would you like to install it?");
+  setUpdateModalCopy("A New Update is Available!", "MiiTuber 0.2.0 is ready. Would you like to install it?");
   setUpdateModalButtons("Update Now", () => showDownloadingUpdate(0), "Update Later", hideUpdateModal);
   showUpdateModal();
 }

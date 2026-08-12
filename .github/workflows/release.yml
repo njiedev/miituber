@@ -17,12 +17,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows installer (.exe/.msi) — the only supported platform.
-          # MiiTuber is intentionally Windows-only: its whole point is a
-          # transparent avatar captured into OBS, which relies on Windows
-          # window/game-capture with alpha. macOS (WKWebView) doesn't support
-          # that path — the same reason VSeeFace, VMagicMirror, and every other
-          # 3D webcam VTuber app is Windows-only. Don't re-add a mac build.
+          # The 0.2.0 release remains Windows-only while public macOS signing
+          # and notarization are deferred. macOS transparency support remains
+          # in the application for local testing and a future Mac release.
           - platform: "windows-latest"
             args: ""
     runs-on: ${{ matrix.platform }}
@@ -58,7 +55,20 @@ jobs:
           # Use the tag that triggered the run (e.g. v0.2.0) as the release tag.
           tagName: ${{ github.ref_name }}
           releaseName: "MiiTuber ${{ github.ref_name }}"
-          releaseBody: "Download the installer for your platform from the assets below."
+          releaseBody: |
+            ## What’s New in MiiTuber 0.2.0
+
+            - Added microphone-only animation for camera-free PNGTuber use.
+            - Added separate camera and microphone mouth activation controls.
+            - Added native Save JSON and Import JSON controls for tuning profiles.
+            - Fixed a bug where microphone lip-sync would not move the Mii without camera tracking.
+            - Fixed a bug where losing face detection could stop microphone mouth movement.
+            - Fixed a bug where selecting a Mii could play dialogue audio with no dialogue visible.
+            - Fixed a bug where starting microphone or camera tracking could play dialogue audio.
+
+            Thanks for 200 downloads! — 3wb <3
+
+            **Compatibility note:** Mii Creator's new update includes custom features that may not yet work with MiiTuber. Avoid those custom features while compatibility work is underway.
           # Publish as a DRAFT so you review/edit notes before it goes public.
           releaseDraft: true
           prerelease: false

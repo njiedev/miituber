@@ -14,19 +14,19 @@ export type ReleaseNotes = {
  * release. This path is intentionally independent from saved avatar data.
  */
 export const RELEASE_NOTES: Readonly<Record<string, ReleaseNotes>> = {
-  "0.1.3": {
-    version: "0.1.3",
-    title: "What’s New in MiiTuber 0.1.3",
+  "0.2.0": {
+    version: "0.2.0",
+    title: "What’s New in MiiTuber 0.2.0",
     items: [
       "Added microphone-only animation for camera-free PNGTuber use.",
       "Added separate camera and microphone mouth activation controls.",
-      "Added/Fixed native Save JSON and Import JSON controls for tuning profiles.",
+      "Added native Save JSON and Import JSON controls for tuning profiles.",
       "Fixed a bug where microphone lip-sync would not move the Mii without the camera running.",
       "Fixed a bug where losing face detection could stop microphone mouth movement.",
       "Fixed a bug where selecting a Mii could play a brief dialogue sound with no dialogue visible.",
       "Fixed a bug where starting microphone or camera tracking could play a brief dialogue sound.",
     ],
-    footer: `Thanks for 200 downloads! — 3wb <3\n\nNOTE: Mii Creator's new update brings features thatwill most likely not be compatible with MiiTuber. Avoid using custom Mii Creator features on miis while I work on a fix.`,
+    footer: `Thanks for 200 downloads! — 3wb <3\n\nNOTE: Mii Creator's new update brings features that will most likely not be compatible with MiiTuber. Avoid using custom Mii Creator features on Miis while I work on a fix.`,
     imageUrl: "/update-modal-mii.png",
   },
 };

@@ -481,11 +481,11 @@ fn auto_allow_media_permissions(window: &tauri::WebviewWindow) {
 pub fn run() {
     tauri::Builder::default()
         .manage(SharedRenderCache::default())
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(windows)]
             {
                 use tauri::Manager;
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = _app.get_webview_window("main") {
                     auto_allow_media_permissions(&window);
                 }
             }
