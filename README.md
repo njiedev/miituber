@@ -2,8 +2,10 @@
 
 <img width="1280" height="310" alt="New Project (1)" src="https://github.com/user-attachments/assets/047e1588-3a1e-4478-ae4e-c9119f5ce943" />
 
-NOTE: Mii Creator(mii.nxw.pw) custom clothes currently do not work with Miituber.
-
+NOTE(s):
+- Mii Creator(mii.nxw.pw) custom clothes currently do not work with Miituber. Researching it atm
+- The software does run on mac, but I do not have an Apple Developer Account at the moment. If you want to use it on mac read the **Building from source** part at the bottom.
+- Making contributor docs soon
 
 Turn your **Mii** into a VTuber. MiiTuber shows your Mii as a live 3D avatar that copies your head movements from your webcam and moves its mouth when you talk, ready to drop into OBS with a transparent background.
 
@@ -86,7 +88,6 @@ npm install
 npm run tauri dev
 ```
 
-Architecture and contributor docs live in [docs/](docs/README.md).
 
 ## License & credits
 
