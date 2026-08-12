@@ -752,6 +752,260 @@ select {
   border-top: 1px solid var(--border);
 }
 
+/* ---- Calm update + What's New popup ---- */
+.update-scrim[hidden] {
+  display: none;
+}
+
+.update-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 28, 38, 0.55);
+}
+
+.update-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: min(300px, 100%);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 18px 50px rgba(20, 28, 38, 0.28);
+  text-align: center;
+}
+
+.update-card[data-kind="whats-new"] {
+  grid-template-columns: minmax(0, 1fr) 250px;
+  grid-template-areas: "content portrait";
+  align-items: stretch;
+  gap: 28px;
+  width: min(720px, 100%);
+  padding: 30px 34px;
+  text-align: left;
+}
+
+.update-card__portrait {
+  grid-area: portrait;
+  align-self: end;
+  width: 112px;
+  height: 112px;
+  object-fit: contain;
+}
+
+.update-card[data-kind="whats-new"] .update-card__portrait {
+  align-self: center;
+  width: 250px;
+  height: 310px;
+  transform: scale(1.3);
+  transform-origin: center;
+}
+
+.update-card__portrait[hidden] {
+  display: none;
+}
+
+.update-card__content {
+  grid-area: content;
+  min-width: 0;
+}
+
+.update-card[data-kind="whats-new"] .update-card__content {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.update-card[data-kind="whats-new"] h2 {
+  margin-bottom: 16px;
+  font-size: 1.36rem;
+  line-height: 1.25;
+}
+
+.update-card[data-kind="whats-new"] .update-card__notes {
+  gap: 10px;
+  margin-top: 0;
+  font-size: 1.04rem;
+  line-height: 1.5;
+}
+
+.update-card__close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 1.45rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.update-card__close:hover {
+  background: #eef0f2;
+  color: var(--text);
+}
+
+.update-card__close[hidden] {
+  display: none;
+}
+
+.update-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.18rem;
+}
+
+.update-card[data-kind="whats-new"] h2 {
+  margin-bottom: 14px;
+  font-size: 1.4rem;
+  line-height: 1.2;
+}
+
+.update-card p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.45;
+}
+
+.update-card__notes {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding-left: 1.2rem;
+  line-height: 1.4;
+}
+
+.update-card[data-kind="whats-new"] .update-card__notes {
+  align-content: space-between;
+  min-height: 260px;
+  gap: 10px;
+  margin-top: 0;
+  padding-left: 1.25rem;
+  font-size: 0.96rem;
+  line-height: 1.45;
+}
+
+.update-card__footer-note {
+  margin-top: 18px !important;
+  color: var(--text) !important;
+  font-size: 0.96rem;
+  font-weight: 700;
+  white-space: pre-line;
+}
+
+.update-card__footer-note[hidden] {
+  display: none;
+}
+
+.update-card__notes[hidden],
+.update-card__progress[hidden],
+.update-card__detail[hidden] {
+  display: none;
+}
+
+.update-card__progress {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+}
+
+.update-card__progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+.update-card__progress span,
+.update-card__detail {
+  font-size: 0.82rem;
+}
+
+.update-card__detail {
+  margin-top: 12px !important;
+  color: var(--error) !important;
+}
+
+.update-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.update-card__actions .btn[hidden] {
+  display: none;
+}
+
+.update-card[data-kind="update"] .update-card__actions .btn {
+  min-width: 120px;
+}
+
+.update-card[data-kind="update"] .update-card__actions {
+  flex-wrap: nowrap;
+}
+
+.update-dev-panel {
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  z-index: 600;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  max-width: min(620px, calc(100vw - 20px));
+  padding: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  font-size: 0.74rem;
+}
+
+.update-dev-panel[hidden] {
+  display: none;
+}
+
+.update-dev-panel button {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px;
+  background: var(--control-bg);
+  cursor: pointer;
+}
+
+@media (max-width: 480px) {
+  .update-card[data-kind="whats-new"] {
+    grid-template-columns: minmax(0, 1fr) 130px;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .update-card[data-kind="whats-new"] .update-card__portrait {
+    width: 130px;
+    height: 190px;
+    transform: scale(1.15);
+  }
+
+  .update-card[data-kind="whats-new"] .update-card__notes {
+    min-height: 0;
+    font-size: 0.86rem;
+  }
+}
+
 /* First-run resource gate: a hard, non-dismissable block over the library.
    Sits above every other modal and the tour, with a heavier scrim. */
 #resource-gate {
@@ -973,6 +1227,14 @@ select {
 .tuning-note {
   font-size: 0.82rem;
   color: var(--text-soft);
+}
+
+.tuning-storage-note {
+  margin: -5px 0 0;
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .tuning-section {

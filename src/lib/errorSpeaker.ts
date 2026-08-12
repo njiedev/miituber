@@ -93,48 +93,11 @@ export class ErrorSpeaker {
   private readonly audio: HTMLAudioElement;
   private activeController: TourController | null = null;
   private activePresenter: TourPresenter | null = null;
-  private audioPrepared = false;
-  private audioPreparing = false;
-  private audioPrepareId = 0;
 
   constructor(private readonly options: ErrorSpeakerOptions) {
     this.audio = new Audio(options.sfxUrl);
     this.audio.loop = true;
     this.audio.volume = 0.35;
-  }
-
-  /**
-   * Browser audio may be blocked when the eventual error happens after an
-   * awaited camera/mic/file operation. Call this from the initiating click.
-   */
-  prepareAudio(): void {
-    if (
-      this.options.isTourActive() ||
-      this.audioPrepared ||
-      this.audioPreparing ||
-      this.activePresenter
-    ) {
-      return;
-    }
-
-    this.audioPreparing = true;
-    const prepareId = ++this.audioPrepareId;
-    const volume = this.audio.volume;
-    this.audio.volume = 0;
-
-    try {
-      this.audio.play().then(
-        () => {
-          this.finishPreparingAudio(prepareId, volume, true);
-          this.audioPrepared = true;
-        },
-        () => {
-          this.finishPreparingAudio(prepareId, volume, false);
-        },
-      );
-    } catch {
-      this.finishPreparingAudio(prepareId, volume, false);
-    }
   }
 
   /** Returns false when a tour owns the overlay and the bubble was skipped. */
@@ -182,26 +145,5 @@ export class ErrorSpeaker {
 
     controller?.skip();
     presenter?.destroy();
-  }
-
-  private finishPreparingAudio(
-    prepareId: number,
-    volume: number,
-    prepared: boolean,
-  ): void {
-    if (prepareId !== this.audioPrepareId) return;
-
-    this.audioPreparing = false;
-    this.audioPrepared = this.audioPrepared || prepared;
-    this.audio.volume = volume;
-
-    if (this.activePresenter) return;
-
-    this.audio.pause();
-    try {
-      this.audio.currentTime = 0;
-    } catch {
-      // Some browsers reject currentTime writes before metadata is available.
-    }
   }
 }

@@ -115,6 +115,59 @@ describe("ExpressionPipeline", () => {
     expect(micOnly.rawMapped.scores.mouthOpen).toBe(0.9);
   });
 
+  it("keeps microphone and camera mouth activation independent", () => {
+    const profile = createDefaultTuningProfile();
+    profile.minimumHoldMs = 0;
+    profile.thresholds.mouthOpen = { enter: 0.9, exit: 0.8 };
+    profile.lipSync.activation = { enter: 0.2, exit: 0.1, gain: 1 };
+    const pipeline = new ExpressionPipeline(profile);
+
+    const micFrame = pipeline.processFrame(
+      shapes({ jawOpen: 0.4 }),
+      undefined,
+      0,
+      0.3,
+      "mic",
+    );
+
+    expect(micFrame.cameraMouthOpenSignal).toBe(false);
+    expect(micFrame.microphoneMouthOpenSignal).toBe(true);
+    expect(micFrame.signals.mouthOpen).toBe(true);
+
+    profile.thresholds.mouthOpen = { enter: 0.2, exit: 0.1 };
+    profile.lipSync.activation = { enter: 0.9, exit: 0.8, gain: 1 };
+    pipeline.updateProfile(profile);
+    const cameraFrame = pipeline.processFrame(
+      shapes({ jawOpen: 0.4 }),
+      undefined,
+      33,
+      0.3,
+      "camera",
+    );
+
+    expect(cameraFrame.cameraMouthOpenSignal).toBe(true);
+    expect(cameraFrame.microphoneMouthOpenSignal).toBe(false);
+    expect(cameraFrame.signals.mouthOpen).toBe(true);
+  });
+
+  it("applies microphone gain without changing the camera score", () => {
+    const profile = createDefaultTuningProfile();
+    profile.minimumHoldMs = 0;
+    profile.lipSync.activation = { enter: 0.5, exit: 0.3, gain: 2 };
+    const pipeline = new ExpressionPipeline(profile);
+
+    const frame = pipeline.processFrame(
+      shapes({ jawOpen: 0.25 }),
+      undefined,
+      0,
+      0.3,
+      "max",
+    );
+
+    expect(frame.cameraMouthOpenScore).toBeCloseTo(0.25);
+    expect(frame.microphoneMouthOpenScore).toBeCloseTo(0.6);
+  });
+
   it("can update tuning profile at runtime", () => {
     const profile = createDefaultTuningProfile();
     profile.oneEuro = { minCutoff: 20, beta: 1, derivativeCutoff: 1 };

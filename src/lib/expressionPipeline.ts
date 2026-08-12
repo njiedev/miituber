@@ -4,6 +4,7 @@ import {
   ExpressionSignalTracker,
   ExpressionStabilizer,
   HeadRotationSmoother,
+  HysteresisTracker,
 } from "./smoothing";
 import {
   FFLExpression,
@@ -25,6 +26,10 @@ export type ExpressionPipelineFrame = {
   signals: ExpressionSignals;
   headRotation: HeadRotation;
   remainingHoldMs: number;
+  cameraMouthOpenScore: number;
+  microphoneMouthOpenScore: number;
+  cameraMouthOpenSignal: boolean;
+  microphoneMouthOpenSignal: boolean;
 };
 
 export type MouthOpenSource = "camera" | "mic" | "max";
@@ -44,6 +49,7 @@ export class ExpressionPipeline {
   private expressionStabilizer: ExpressionStabilizer;
   private blendshapeSmoother: BlendshapeSmoother;
   private headRotationSmoother = new HeadRotationSmoother(0.35);
+  private microphoneMouthTracker: HysteresisTracker;
 
   constructor(private profile: TuningProfile) {
     this.signalTracker = new ExpressionSignalTracker(profile);
@@ -52,6 +58,10 @@ export class ExpressionPipeline {
       profile.minimumHoldMs,
     );
     this.blendshapeSmoother = new BlendshapeSmoother(profile.oneEuro);
+    this.microphoneMouthTracker = new HysteresisTracker(
+      profile.lipSync.activation.enter,
+      profile.lipSync.activation.exit,
+    );
   }
 
   updateProfile(profile: TuningProfile) {
@@ -60,6 +70,11 @@ export class ExpressionPipeline {
     this.signalTracker.reset();
     this.expressionStabilizer.updateMinimumHoldMs(profile.minimumHoldMs);
     this.blendshapeSmoother.updateOptions(profile.oneEuro);
+    this.microphoneMouthTracker.updateThresholds(
+      profile.lipSync.activation.enter,
+      profile.lipSync.activation.exit,
+    );
+    this.microphoneMouthTracker.reset();
   }
 
   processFrame(
@@ -83,12 +98,25 @@ export class ExpressionPipeline {
       undefined,
       this.profile,
     );
-    rawMapped.scores.mouthOpen = selectMouthOpenScore(
-      rawMapped.scores.mouthOpen,
-      externalMouthOpenScore,
-      mouthOpenSource,
+    const cameraMouthOpenScore = rawMapped.scores.mouthOpen;
+    const microphoneMouthOpenScore = clamp01(
+      externalMouthOpenScore * this.profile.lipSync.activation.gain,
     );
     const signals = this.signalTracker.update(rawMapped.scores);
+    const cameraMouthOpenSignal = signals.mouthOpen;
+    const microphoneMouthOpenSignal = this.microphoneMouthTracker.update(
+      microphoneMouthOpenScore,
+    );
+    signals.mouthOpen = selectMouthOpenSignal(
+      cameraMouthOpenSignal,
+      microphoneMouthOpenSignal,
+      mouthOpenSource,
+    );
+    rawMapped.scores.mouthOpen = selectMouthOpenScore(
+      cameraMouthOpenScore,
+      microphoneMouthOpenScore,
+      mouthOpenSource,
+    );
     const mapped = mapToExpression(
       smoothedBlendshapes,
       transformMatrix,
@@ -112,14 +140,29 @@ export class ExpressionPipeline {
       signals,
       headRotation,
       remainingHoldMs: this.expressionStabilizer.getRemainingHoldMs(nowMs),
+      cameraMouthOpenScore,
+      microphoneMouthOpenScore,
+      cameraMouthOpenSignal,
+      microphoneMouthOpenSignal,
     };
   }
 
   reset() {
     this.signalTracker.reset();
+    this.microphoneMouthTracker.reset();
     this.blendshapeSmoother.reset();
     this.headRotationSmoother.reset();
   }
+}
+
+function selectMouthOpenSignal(
+  cameraOpen: boolean,
+  microphoneOpen: boolean,
+  source: MouthOpenSource,
+) {
+  if (source === "mic") return microphoneOpen;
+  if (source === "max") return cameraOpen || microphoneOpen;
+  return cameraOpen;
 }
 
 function selectMouthOpenScore(

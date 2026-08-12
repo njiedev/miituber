@@ -17,17 +17,24 @@
     "core:window:allow-show",
     "core:webview:allow-get-all-webviews",
     "dialog:allow-open",
+    "dialog:allow-save",
     {
       "identifier": "fs:allow-mkdir",
       "allow": [{ "path": "$APPDATA" }]
     },
     {
       "identifier": "fs:allow-read-file",
-      "allow": [{ "path": "$APPDATA/AFLResHigh_2_3.dat" }]
+      "allow": [
+        { "path": "$APPDATA/AFLResHigh_2_3.dat" },
+        { "path": "$APPDATA/miituber-tuning-profile.json" }
+      ]
     },
     {
       "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "$APPDATA/AFLResHigh_2_3.dat" }]
+      "allow": [
+        { "path": "$APPDATA/AFLResHigh_2_3.dat" },
+        { "path": "$APPDATA/miituber-tuning-profile.json" }
+      ]
     },
     "opener:default",
     "updater:default",

@@ -20,6 +20,7 @@ export type TuningProfile = {
     noiseFloor: number;
     speakingLevel: number;
     smoothing: number;
+    activation: HysteresisSetting & { gain: number };
   };
   minimumHoldMs: number;
   calibration: Record<string, number>;
@@ -64,6 +65,7 @@ export const DEFAULT_TUNING_PROFILE: TuningProfile = {
     noiseFloor: 0.02,
     speakingLevel: 0.12,
     smoothing: 0.35,
+    activation: { enter: 0.45, exit: 0.32, gain: 1 },
   },
   minimumHoldMs: 100,
   calibration: {},
@@ -89,7 +91,10 @@ export function cloneTuningProfile(profile: TuningProfile): TuningProfile {
       SIGNAL_NAMES.map((name) => [name, profile.gains[name]]),
     ) as Record<SignalName, number>,
     oneEuro: { ...profile.oneEuro },
-    lipSync: { ...profile.lipSync },
+    lipSync: {
+      ...profile.lipSync,
+      activation: { ...profile.lipSync.activation },
+    },
     minimumHoldMs: profile.minimumHoldMs,
     calibration: { ...profile.calibration },
   };
@@ -112,6 +117,12 @@ export function normalizeTuningProfile(profile: Partial<TuningProfile>): TuningP
     finiteOrDefault(profile.lipSync?.noiseFloor, fallback.lipSync.noiseFloor),
     0,
     0.5,
+  );
+  const lipSyncActivationEnter = clamp01(
+    finiteOrDefault(
+      profile.lipSync?.activation?.enter,
+      fallback.lipSync.activation.enter,
+    ),
   );
 
   for (const name of SIGNAL_NAMES) {
@@ -154,6 +165,26 @@ export function normalizeTuningProfile(profile: Partial<TuningProfile>): TuningP
         0,
         1,
       ),
+      activation: {
+        enter: lipSyncActivationEnter,
+        exit: clamp01(
+          Math.min(
+            finiteOrDefault(
+              profile.lipSync?.activation?.exit,
+              fallback.lipSync.activation.exit,
+            ),
+            lipSyncActivationEnter,
+          ),
+        ),
+        gain: clamp(
+          finiteOrDefault(
+            profile.lipSync?.activation?.gain,
+            fallback.lipSync.activation.gain,
+          ),
+          0,
+          3,
+        ),
+      },
     },
     minimumHoldMs: Math.max(0, profile.minimumHoldMs ?? fallback.minimumHoldMs),
     calibration: normalizeCalibration(profile.calibration),

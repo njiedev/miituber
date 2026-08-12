@@ -33,6 +33,7 @@ describe("tuning profile", () => {
         noiseFloor: 2,
         speakingLevel: 0.01,
         smoothing: -1,
+        activation: { enter: 2, exit: 0.8, gain: 9 },
       },
       minimumHoldMs: -10,
       calibration: {
@@ -52,6 +53,7 @@ describe("tuning profile", () => {
       noiseFloor: 0.5,
       speakingLevel: 0.501,
       smoothing: 0,
+      activation: { enter: 1, exit: 0.8, gain: 3 },
     });
     expect(profile.minimumHoldMs).toBe(0);
     expect(profile.calibration).toEqual({ jawOpen: 1 });
@@ -64,5 +66,18 @@ describe("tuning profile", () => {
     expect(parseTuningProfileJson(serializeTuningProfile(profile)).minimumHoldMs).toBe(
       250,
     );
+  });
+
+  it("adds independent microphone activation defaults to older profiles", () => {
+    const olderProfile = createDefaultTuningProfile() as unknown as {
+      lipSync: Omit<ReturnType<typeof createDefaultTuningProfile>["lipSync"], "activation">;
+    };
+    delete (olderProfile.lipSync as { activation?: unknown }).activation;
+
+    expect(normalizeTuningProfile(olderProfile as never).lipSync.activation).toEqual({
+      enter: 0.45,
+      exit: 0.32,
+      gain: 1,
+    });
   });
 });

@@ -1,10 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
-import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
+import {
+  check as checkForUpdate,
+  type Update,
+} from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
   averageBlendshapeSamples,
@@ -15,11 +19,23 @@ import {
   zeroExpressionSignals,
 } from "./lib/expressionPipeline";
 import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
+import { AvatarPoseCoordinator } from "./lib/avatarPoseCoordinator";
 import { LipSyncEnvelope, rootMeanSquare } from "./lib/lipSync";
 import { AvatarScene } from "./lib/scene";
 import { ensureReady, type FFLContext } from "./lib/fflRenderer";
 import { normalizeMiiBytes } from "./lib/miiData";
 import { renderMiiThumbnailDataUrl } from "./lib/miiThumbnail";
+import {
+  friendlyErrorMessage,
+  mediaErrorCode,
+  reportAppError,
+  type AppErrorCode,
+} from "./lib/appDiagnostics";
+import {
+  hasLegacyInstallData,
+  releaseNotesForVersion,
+  shouldShowReleaseNotes,
+} from "./lib/releaseNotes";
 
 /**
  * When true, render Miis in-process via FFL.js instead of the external
@@ -245,6 +261,7 @@ import {
 import {
   addAvatar,
   getAvatar,
+  LIBRARY_STORAGE_KEY,
   readLibrary,
   removeAvatar,
   renameAvatar,
@@ -255,6 +272,7 @@ import {
 import {
   readTourState,
   shouldAutoStart,
+  TOUR_STORAGE_KEY,
   TOUR_CHAPTERS,
   TourController,
   writeTourState,
@@ -274,6 +292,18 @@ const CLEAN_OUTPUT_VIEW = "clean-output";
 const CLEAN_OUTPUT_AVATAR_STORAGE_KEY = "miituber.cleanOutputAvatar.v1";
 const BODY_VISIBLE_STORAGE_KEY = "miituber.bodyVisible.v1";
 const SHOW_DEBUG_INFO_STORAGE_KEY = "miituber.showDebugInfo.v1";
+const LAST_SEEN_RELEASE_NOTES_KEY = "miituber.lastSeenReleaseNotesVersion.v1";
+const LAST_LAUNCHED_VERSION_KEY = "miituber.lastLaunchedVersion.v1";
+const TUNING_PROFILE_STORAGE_KEY = "miituber.tuningProfile.v1";
+const TUNING_PROFILE_FILE_NAME = "miituber-tuning-profile.json";
+const TUNING_SAVE_DEBOUNCE_MS = 400;
+const LEGACY_INSTALL_STORAGE_KEYS = [
+  LIBRARY_STORAGE_KEY,
+  TOUR_STORAGE_KEY,
+  CLEAN_OUTPUT_AVATAR_STORAGE_KEY,
+  BODY_VISIBLE_STORAGE_KEY,
+  SHOW_DEBUG_INFO_STORAGE_KEY,
+] as const;
 const CLEAN_OUTPUT_AVATAR_EVENT = "clean-output-avatar";
 const CLEAN_OUTPUT_BACKGROUND_EVENT = "clean-output-background";
 const CLEAN_OUTPUT_POSE_EVENT = "clean-output-pose";
@@ -282,14 +312,6 @@ const CLEAN_OUTPUT_HIDDEN_EVENT = "clean-output-hidden";
 
 const searchParams = new URLSearchParams(window.location.search);
 const isCleanOutputWindow = searchParams.get("view") === CLEAN_OUTPUT_VIEW;
-const isPortraitCaptureMode =
-  import.meta.env.DEV && searchParams.has("capture-portraits");
-
-if (isPortraitCaptureMode) {
-  void import("./dev/capturePortraits").then((module) =>
-    module.runPortraitCapture(),
-  );
-}
 
 const fileInput = document.querySelector<HTMLInputElement>("#mii-file");
 const statusEl = document.querySelector<HTMLElement>("#status");
@@ -365,10 +387,16 @@ const calibrationStatusEl = document.querySelector<HTMLElement>(
   "#calibration-status",
 );
 const calibrateButton = document.querySelector<HTMLButtonElement>("#calibrate-button");
+const resetProfileButton = document.querySelector<HTMLButtonElement>(
+  "#reset-profile-button",
+);
 const saveProfileButton =
   document.querySelector<HTMLButtonElement>("#save-profile-button");
-const loadProfileInput =
-  document.querySelector<HTMLInputElement>("#load-profile-input");
+const loadProfileButton =
+  document.querySelector<HTMLButtonElement>("#load-profile-button");
+const tuningStorageNoteEl = document.querySelector<HTMLElement>(
+  "#tuning-storage-note",
+);
 const signalTuningControlsEl = document.querySelector<HTMLElement>(
   "#signal-tuning-controls",
 );
@@ -385,13 +413,9 @@ const advancedDebugInfoEl = document.querySelector<HTMLElement>(
 );
 const minimumHoldMsInput =
   document.querySelector<HTMLInputElement>("#minimum-hold-ms");
-const lipSyncNoiseFloorInput =
-  document.querySelector<HTMLInputElement>("#lip-sync-noise-floor");
-const lipSyncSpeakingLevelInput = document.querySelector<HTMLInputElement>(
-  "#lip-sync-speaking-level",
+const micMouthTuningControlEl = document.querySelector<HTMLElement>(
+  "#mic-mouth-tuning-control",
 );
-const lipSyncSmoothingInput =
-  document.querySelector<HTMLInputElement>("#lip-sync-smoothing");
 const toggleCleanOutputButton = document.querySelector<HTMLButtonElement>(
   "#toggle-clean-output-button",
 );
@@ -421,15 +445,55 @@ const libraryActionBody =
   document.querySelector<HTMLElement>("#library-action-body");
 const libraryActionFooter =
   document.querySelector<HTMLElement>("#library-action-footer");
+const updateModal = document.querySelector<HTMLElement>("#update-modal");
+const updateCard = document.querySelector<HTMLElement>("#update-card");
+const updateModalImage =
+  document.querySelector<HTMLImageElement>("#update-modal-image");
+const updateModalTitle =
+  document.querySelector<HTMLElement>("#update-modal-title");
+const updateModalMessage =
+  document.querySelector<HTMLElement>("#update-modal-message");
+const updateModalNotes =
+  document.querySelector<HTMLUListElement>("#update-modal-notes");
+const updateModalFooterNote = document.querySelector<HTMLElement>(
+  "#update-modal-footer-note",
+);
+const updateModalProgressWrap = document.querySelector<HTMLElement>(
+  "#update-modal-progress-wrap",
+);
+const updateModalProgress =
+  document.querySelector<HTMLProgressElement>("#update-modal-progress");
+const updateModalProgressLabel = document.querySelector<HTMLElement>(
+  "#update-modal-progress-label",
+);
+const updateModalDetail =
+  document.querySelector<HTMLElement>("#update-modal-detail");
+const updatePrimaryButton = document.querySelector<HTMLButtonElement>(
+  "#update-primary-button",
+);
+const updateSecondaryButton = document.querySelector<HTMLButtonElement>(
+  "#update-secondary-button",
+);
+const updateCloseButton = document.querySelector<HTMLButtonElement>(
+  "#update-modal-close",
+);
+const updateDevPanel = document.querySelector<HTMLElement>("#update-dev-panel");
 let pendingImport: { bytes: number[]; thumbnailDataUrl: string | null } | null = null;
 let currentAvatarId: string | null = null;
 let avatarLoaded = false;
 let avatarHasExpressionVariants = false;
 let tracking = false;
 let tuningProfile = createDefaultTuningProfile();
+let tuningProfileStoragePath: string | null = null;
+let tuningSaveTimer: number | null = null;
+let tuningWriteQueue = Promise.resolve();
 let calibrationSession: CalibrationSession | null = null;
 let latestExpressionScores: ExpressionScores = zeroExpressionScores();
 let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
+let latestCameraMouthScore = 0;
+let latestCameraMouthSignal = false;
+let latestMicrophoneMouthScore = 0;
+let latestMicrophoneMouthSignal = false;
 let cleanOutputMode = false;
 let isolateMode = false;
 let currentCleanOutputAvatar: CleanOutputStoredAvatar | null = null;
@@ -459,6 +523,12 @@ let activeTourController: TourController | null = null;
 let activeTourPresenter: TourPresenter | null = null;
 let activeTourChapterId: TourChapterId | null = null;
 let errorSpeaker: ErrorSpeaker | null = null;
+let updateModalActive = false;
+let updateExperienceChecking = true;
+let rendererPrewarmFinished = false;
+let updatePrimaryAction: (() => void) | null = null;
+let updateSecondaryAction: (() => void) | null = null;
+let updateCloseAction: (() => void) | null = null;
 
 type CalibrationSession = {
   startedAt: number;
@@ -535,6 +605,15 @@ function setLipSyncStatus(
 
   lipSyncStatusEl.textContent = message;
   lipSyncStatusEl.dataset.tone = tone;
+}
+
+function userFacingError(
+  code: AppErrorCode,
+  error: unknown,
+  context: Record<string, unknown> = {},
+): string {
+  reportAppError(code, error, context);
+  return friendlyErrorMessage(code);
 }
 
 function logRenderEvent(message: string, details: Record<string, unknown> = {}) {
@@ -726,34 +805,364 @@ const avatarScene = new AvatarScene(canvas, {
 });
 const faceTracker = new FaceTracker();
 const expressionPipeline = new ExpressionPipeline(tuningProfile);
+const avatarPoseCoordinator = new AvatarPoseCoordinator(expressionPipeline);
 
 window.addEventListener("resize", () => avatarScene.resize());
 if (isCleanOutputWindow) {
   void initializeCleanOutputWindow();
-} else if (isPortraitCaptureMode) {
-  // The capture utility owns the page DOM and is loaded dynamically above.
 } else {
-  initializeMainWindow();
+  void initializeMainWindow();
 }
 
-async function checkForAppUpdateOnLaunch() {
+async function initializeUpdateExperience() {
+  wireUpdateModalControls();
+  initializeUpdateDevControls();
+
+  // Browsers cannot use Tauri's signed updater. The opt-in development panel
+  // still works there, which makes every visual state easy to test with Vite.
+  if (!isRunningInTauri()) {
+    finishUpdateCheckWithoutModal();
+    return;
+  }
+
+  let installedVersion: string;
   try {
-    const update = await checkForUpdate();
-    if (!update) return;
-
-    const install = window.confirm(
-      `MiiTuber ${update.version} is available (you have ${update.currentVersion}). Install and restart now?`,
-    );
-    if (!install) return;
-
-    await update.downloadAndInstall();
-    await relaunch();
+    installedVersion = await getVersion();
   } catch (error) {
-    console.error("[MiiTuber] update check failed", error);
+    reportAppError("UPDATE_FAILED", error, { action: "read installed version" });
+    finishUpdateCheckWithoutModal();
+    return;
+  }
+  const previousVersion = localStorage.getItem(LAST_LAUNCHED_VERSION_KEY);
+  const legacyInstallDetected =
+    previousVersion === null &&
+    hasLegacyInstallData(localStorage, LEGACY_INSTALL_STORAGE_KEYS);
+  localStorage.setItem(LAST_LAUNCHED_VERSION_KEY, installedVersion);
+
+  try {
+    const update = await checkForUpdate({ timeout: 10_000 });
+    if (update) {
+      updateExperienceChecking = false;
+      showAvailableUpdate(update);
+      return;
+    }
+  } catch (error) {
+    // A background check failure should not interrupt startup. Download and
+    // installation failures are shown inside the modal after the user opts in.
+    reportAppError("UPDATE_FAILED", error, { action: "startup update check" });
+  }
+
+  updateExperienceChecking = false;
+  showWhatsNewIfNeeded(installedVersion, previousVersion, legacyInstallDetected);
+  if (!updateModalActive && rendererPrewarmFinished) startTourIfNeeded("library");
+}
+
+function finishUpdateCheckWithoutModal() {
+  updateExperienceChecking = false;
+  if (rendererPrewarmFinished) startTourIfNeeded("library");
+}
+
+function wireUpdateModalControls() {
+  updatePrimaryButton?.addEventListener("click", () => updatePrimaryAction?.());
+  updateSecondaryButton?.addEventListener("click", () => updateSecondaryAction?.());
+  updateCloseButton?.addEventListener("click", () => updateCloseAction?.());
+  updateModalImage?.addEventListener("error", () => {
+    updateModalImage.hidden = true;
+  });
+}
+
+function showAvailableUpdate(update: Update) {
+  resetUpdateModal();
+  setUpdateModalCopy(
+    "A New Update is Available!",
+    `MiiTuber ${update.version} is ready. Would you like to install it?`,
+  );
+  setUpdateModalButtons(
+    "Update Now",
+    () => void installAvailableUpdate(update),
+    "Update Later",
+    hideUpdateModal,
+  );
+  showUpdateModal();
+}
+
+async function installAvailableUpdate(update: Update) {
+  let downloadedBytes = 0;
+  let totalBytes: number | undefined;
+
+  showDownloadingUpdate();
+  try {
+    await update.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        downloadedBytes = 0;
+        totalBytes = event.data.contentLength;
+        updateDownloadProgress(downloadedBytes, totalBytes);
+      } else if (event.event === "Progress") {
+        downloadedBytes += event.data.chunkLength;
+        updateDownloadProgress(downloadedBytes, totalBytes);
+      } else if (event.event === "Finished") {
+        showInstallingUpdate();
+      }
+    });
+    showReadyToRestart(update.version);
+  } catch (error) {
+    reportAppError("UPDATE_FAILED", error, { action: "download and install" });
+    showUpdateError(update, friendlyUpdateError(error));
   }
 }
 
-function initializeMainWindow() {
+function showDownloadingUpdate(percent?: number) {
+  resetUpdateModal();
+  setUpdateModalCopy("Downloading Update", "You can keep this window open while MiiTuber gets ready.");
+  if (updateModalProgressWrap) updateModalProgressWrap.hidden = false;
+  if (updateModalProgressLabel) {
+    updateModalProgressLabel.textContent =
+      percent === undefined ? "Downloading…" : `Downloading… ${Math.round(percent)}%`;
+  }
+  if (updateModalProgress) {
+    if (percent === undefined) updateModalProgress.removeAttribute("value");
+    else updateModalProgress.value = percent;
+  }
+  setUpdateModalButtons(null, null, null, null);
+  showUpdateModal();
+}
+
+function updateDownloadProgress(downloadedBytes: number, totalBytes?: number) {
+  if (!updateModalProgress || !updateModalProgressLabel) return;
+  if (!totalBytes || totalBytes <= 0) {
+    updateModalProgress.removeAttribute("value");
+    updateModalProgressLabel.textContent = "Downloading…";
+    return;
+  }
+
+  const percent = Math.min(100, Math.round((downloadedBytes / totalBytes) * 100));
+  updateModalProgress.value = percent;
+  updateModalProgressLabel.textContent = `Downloading… ${percent}%`;
+}
+
+function showInstallingUpdate() {
+  resetUpdateModal();
+  setUpdateModalCopy("Installing Update", "Almost there. MiiTuber will be ready to restart shortly.");
+  if (updateModalProgressWrap) updateModalProgressWrap.hidden = false;
+  if (updateModalProgress) updateModalProgress.removeAttribute("value");
+  if (updateModalProgressLabel) updateModalProgressLabel.textContent = "Installing…";
+  setUpdateModalButtons(null, null, null, null);
+  showUpdateModal();
+}
+
+function showReadyToRestart(version: string) {
+  resetUpdateModal();
+  setUpdateModalCopy("Update Ready", `MiiTuber ${version} is installed and ready to restart.`);
+  setUpdateModalButtons(
+    "Restart Now",
+    () => void relaunch().catch((error) => {
+      reportAppError("UPDATE_FAILED", error, { action: "relaunch" });
+      if (updateModalDetail) {
+        updateModalDetail.textContent = "MiiTuber could not restart automatically. Close and reopen the app to finish.";
+        updateModalDetail.hidden = false;
+      }
+    }),
+    "Restart Later",
+    hideUpdateModal,
+  );
+  showUpdateModal();
+}
+
+function showUpdateError(update: Update | null, message: string) {
+  resetUpdateModal();
+  setUpdateModalCopy("Update Paused", "MiiTuber could not finish the update.");
+  if (updateModalDetail) {
+    updateModalDetail.textContent = message;
+    updateModalDetail.hidden = false;
+  }
+  setUpdateModalButtons(
+    update ? "Try Again" : null,
+    update ? () => void installAvailableUpdate(update) : null,
+    "Update Later",
+    hideUpdateModal,
+  );
+  showUpdateModal();
+}
+
+function friendlyUpdateError(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  if (/network|fetch|connect|offline|timed? ?out/i.test(text)) {
+    return "Check your internet connection, then try again.";
+  }
+  if (/permission|denied|access/i.test(text)) {
+    return "MiiTuber needs permission to replace the installed app. Try closing other MiiTuber windows first.";
+  }
+  return "Nothing was changed. You can try again now or update later.";
+}
+
+function showWhatsNewIfNeeded(
+  installedVersion: string,
+  previousVersion: string | null,
+  legacyInstallDetected = false,
+) {
+  const lastSeenVersion = localStorage.getItem(LAST_SEEN_RELEASE_NOTES_KEY);
+  if (!shouldShowReleaseNotes(
+    installedVersion,
+    previousVersion,
+    lastSeenVersion,
+    legacyInstallDetected,
+  )) {
+    return;
+  }
+  showWhatsNew(installedVersion, true);
+}
+
+function showWhatsNew(version: string, rememberOnDismiss: boolean) {
+  const release = releaseNotesForVersion(version);
+  if (!release) return;
+
+  resetUpdateModal();
+  if (updateCard) updateCard.dataset.kind = "whats-new";
+  setUpdateModalImage(release.imageUrl);
+  setUpdateModalCopy(release.title, "");
+  if (updateModalMessage) updateModalMessage.hidden = true;
+  if (updateModalNotes) {
+    updateModalNotes.replaceChildren(
+      ...release.items.map((item) => {
+        const listItem = document.createElement("li");
+        listItem.textContent = item;
+        return listItem;
+      }),
+    );
+    updateModalNotes.hidden = false;
+  }
+  if (updateModalFooterNote) {
+    updateModalFooterNote.textContent = release.footer ?? "";
+    updateModalFooterNote.hidden = !release.footer;
+  }
+  setUpdateModalButtons(null, null, null, null);
+  updateCloseAction = () => {
+    if (rememberOnDismiss) {
+      localStorage.setItem(LAST_SEEN_RELEASE_NOTES_KEY, version);
+    }
+    hideUpdateModal();
+  };
+  if (updateCloseButton) updateCloseButton.hidden = false;
+  showUpdateModal();
+}
+
+function setUpdateModalCopy(title: string, message: string) {
+  if (updateModalTitle) updateModalTitle.textContent = title;
+  if (updateModalMessage) updateModalMessage.textContent = message;
+}
+
+function setUpdateModalImage(imageUrl: string) {
+  if (updateModalImage) {
+    updateModalImage.hidden = false;
+    updateModalImage.src = imageUrl;
+  }
+}
+
+function hideUpdateModalImage() {
+  if (updateModalImage) updateModalImage.hidden = true;
+}
+
+function setUpdateModalButtons(
+  primaryLabel: string | null,
+  primaryAction: (() => void) | null,
+  secondaryLabel: string | null,
+  secondaryAction: (() => void) | null,
+) {
+  updatePrimaryAction = primaryAction;
+  updateSecondaryAction = secondaryAction;
+  if (updatePrimaryButton) {
+    updatePrimaryButton.hidden = primaryLabel === null;
+    updatePrimaryButton.disabled = primaryAction === null;
+    if (primaryLabel) updatePrimaryButton.textContent = primaryLabel;
+  }
+  if (updateSecondaryButton) {
+    updateSecondaryButton.hidden = secondaryLabel === null;
+    updateSecondaryButton.disabled = secondaryAction === null;
+    if (secondaryLabel) updateSecondaryButton.textContent = secondaryLabel;
+  }
+}
+
+function resetUpdateModal() {
+  if (updateCard) updateCard.dataset.kind = "update";
+  hideUpdateModalImage();
+  updateCloseAction = null;
+  if (updateCloseButton) updateCloseButton.hidden = true;
+  if (updateModalMessage) updateModalMessage.hidden = false;
+  if (updateModalNotes) {
+    updateModalNotes.hidden = true;
+    updateModalNotes.replaceChildren();
+  }
+  if (updateModalFooterNote) {
+    updateModalFooterNote.hidden = true;
+    updateModalFooterNote.textContent = "";
+  }
+  if (updateModalProgressWrap) updateModalProgressWrap.hidden = true;
+  if (updateModalDetail) {
+    updateModalDetail.hidden = true;
+    updateModalDetail.textContent = "";
+  }
+  setUpdateModalButtons(null, null, null, null);
+}
+
+function showUpdateModal() {
+  if (!updateModal) return;
+  endActiveTour();
+  updateModalActive = true;
+  updateModal.hidden = false;
+  window.setTimeout(() => {
+    const target = !updatePrimaryButton?.hidden
+      ? updatePrimaryButton
+      : updateSecondaryButton;
+    target?.focus();
+  }, 0);
+}
+
+function hideUpdateModal() {
+  if (updateModal) updateModal.hidden = true;
+  updateModalActive = false;
+  updatePrimaryAction = null;
+  updateSecondaryAction = null;
+  updateCloseAction = null;
+  if (rendererPrewarmFinished) {
+    startTourIfNeeded(appShellEl?.classList.contains("mode-workspace") ? "workspace" : "library");
+  }
+}
+
+function initializeUpdateDevControls() {
+  if (!import.meta.env.DEV || searchParams.get("test-updates") !== "1") {
+    updateDevPanel?.remove();
+    return;
+  }
+  if (updateDevPanel) updateDevPanel.hidden = false;
+  updateDevPanel?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      "button[data-update-test]",
+    );
+    const state = button?.dataset.updateTest;
+    if (!state) return;
+    if (state === "available") showTestAvailableUpdate();
+    if (state === "downloading") showDownloadingUpdate(35);
+    if (state === "installing") showInstallingUpdate();
+    if (state === "ready") showReadyToRestart("0.1.3");
+    if (state === "error") showUpdateError(null, "Test error: nothing was changed.");
+    if (state === "whats-new") showWhatsNewIfNeeded("0.1.3", "0.1.2");
+    if (state === "clear-seen") {
+      localStorage.removeItem(LAST_SEEN_RELEASE_NOTES_KEY);
+      button.textContent = "Cleared!";
+      window.setTimeout(() => { button.textContent = "Clear seen version"; }, 900);
+    }
+  });
+}
+
+function showTestAvailableUpdate() {
+  resetUpdateModal();
+  setUpdateModalCopy("A New Update is Available!", "MiiTuber 0.1.3 is ready. Would you like to install it?");
+  setUpdateModalButtons("Update Now", () => showDownloadingUpdate(0), "Update Later", hideUpdateModal);
+  showUpdateModal();
+}
+
+async function initializeMainWindow() {
+  await initializeTuningProfilePersistence();
   populateExpressionSelect();
   populateTuningControls();
   updateAvatarBackground();
@@ -772,24 +1181,29 @@ function initializeMainWindow() {
     void refreshCameraList();
   });
   void refreshCameraList();
-  void checkForAppUpdateOnLaunch();
+  void initializeUpdateExperience();
   void refreshMicrophoneList();
   // Warm the renderer first: on first run this raises the blocking resource
   // gate. Only once the gate is cleared (resource present) do we start the
   // library tour, so the tour never appears behind the gate.
-  void prewarmFflRenderer().then(() => startTourIfNeeded("library"));
-  void listen(CLEAN_OUTPUT_READY_EVENT, () => {
-    void publishCleanOutputAvatarSnapshot();
+  void prewarmFflRenderer().then(() => {
+    rendererPrewarmFinished = true;
+    startTourIfNeeded("library");
   });
-  void listen(CLEAN_OUTPUT_HIDDEN_EVENT, () => {
-    cleanOutputMode = false;
-    setOutputButtons();
-    setOutputStatus("OBS Clean View closed.", "idle");
-  });
-  void WebviewWindow.getCurrent().onCloseRequested(async () => {
-    const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
-    await cleanWindow?.destroy();
-  });
+  if (isRunningInTauri()) {
+    void listen(CLEAN_OUTPUT_READY_EVENT, () => {
+      void publishCleanOutputAvatarSnapshot();
+    });
+    void listen(CLEAN_OUTPUT_HIDDEN_EVENT, () => {
+      cleanOutputMode = false;
+      setOutputButtons();
+      setOutputStatus("OBS Clean View closed.", "idle");
+    });
+    void WebviewWindow.getCurrent().onCloseRequested(async () => {
+      const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
+      await cleanWindow?.destroy();
+    });
+  }
 }
 
 async function initializeCleanOutputWindow() {
@@ -860,9 +1274,7 @@ async function openCleanOutputWindow() {
   } catch (error) {
     cleanOutputMode = false;
     setOutputButtons();
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[MiiTuber] OBS Clean View open failed", { error, message });
-    setOutputStatus(`Could not open OBS Clean View: ${message}`, "error");
+    setOutputStatus(userFacingError("CLEAN_VIEW_FAILED", error, { action: "open" }), "error");
   }
 }
 
@@ -871,9 +1283,7 @@ async function closeCleanOutputWindow() {
     const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
     await cleanWindow?.hide();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[MiiTuber] OBS Clean View close failed", { error, message });
-    setOutputStatus(`Could not close OBS Clean View: ${message}`, "error");
+    setOutputStatus(userFacingError("CLEAN_VIEW_FAILED", error, { action: "close" }), "error");
     return;
   }
 
@@ -887,7 +1297,7 @@ async function hideCurrentCleanOutputWindow() {
     await WebviewWindow.getCurrent().hide();
     await emit(CLEAN_OUTPUT_HIDDEN_EVENT);
   } catch (error) {
-    console.warn("[MiiTuber] clean output hide failed", { error });
+    reportAppError("CLEAN_VIEW_FAILED", error, { action: "hide" });
   }
 }
 
@@ -943,12 +1353,7 @@ async function loadCleanOutputAvatar(payload: CleanOutputAvatarPayload) {
     if (emptyPreviewEl) emptyPreviewEl.hidden = true;
     setStatus(`OBS Clean View rendering ${payload.name}.`, "success");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[MiiTuber] clean output avatar load failed", {
-      error,
-      message,
-    });
-    setStatus(`Could not load OBS Clean View avatar: ${message}`, "error");
+    setStatus(userFacingError("AVATAR_RENDER_FAILED", error, { view: "clean output" }), "error");
   }
 }
 
@@ -1076,8 +1481,7 @@ async function refreshCameraList(options: { primePermission?: boolean } = {}) {
   } catch (error) {
     if (refreshSequence !== cameraRefreshSequence) return;
     cameraSelect.disabled = cameraSelect.options.length <= 1;
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn("[MiiTuber] camera list refresh failed", { error, message });
+    reportAppError(mediaErrorCode("camera", error), error, { action: "list devices" });
   }
 }
 
@@ -1116,8 +1520,7 @@ async function refreshMicrophoneList() {
     microphoneAvailable = false;
     setLipSyncButtons();
     microphoneSelect.disabled = true;
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn("[MiiTuber] microphone list refresh failed", { error, message });
+    reportAppError(mediaErrorCode("microphone", error), error, { action: "list devices" });
   }
 }
 
@@ -1182,7 +1585,6 @@ window.addEventListener("keydown", (event) => {
 });
 
 startLipSyncButton?.addEventListener("click", () => {
-  prepareErrorSpeechAudio();
   void requestStartLipSync();
 });
 
@@ -1191,12 +1593,9 @@ async function requestStartLipSync() {
     await startLipSync();
   } catch (error) {
     stopLipSync();
-    const message = formatMicrophoneError(error);
-    console.error("[MiiTuber] lip-sync failed to start", { error, message });
-    setLipSyncStatus(
-      `Could not start mic lip-sync: ${message} Camera jaw tracking is still available.`,
-      "error",
-    );
+    setLipSyncStatus(userFacingError(mediaErrorCode("microphone", error), error, {
+      action: "start lip sync",
+    }), "error");
     speakError(miiMicrophoneErrorLine(error));
   }
 }
@@ -1225,8 +1624,115 @@ calibrateButton?.addEventListener("click", () => {
   setCalibrationStatus("Calibrating neutral face... hold still for 2 seconds.");
 });
 
-saveProfileButton?.addEventListener("click", () => {
+resetProfileButton?.addEventListener("click", () => {
+  const confirmed = window.confirm(
+    "Restore all expression tuning and calibration values to their defaults?",
+  );
+  if (!confirmed) return;
+
+  applyTuningProfile(createDefaultTuningProfile());
+  setCalibrationStatus("Restored the default tuning profile.", "success");
+});
+
+async function initializeTuningProfilePersistence() {
+  if (!isRunningInTauri()) {
+    if (tuningStorageNoteEl) {
+      tuningStorageNoteEl.textContent =
+        "Changes are saved automatically in this browser.";
+    }
+    try {
+      const savedProfile = localStorage.getItem(TUNING_PROFILE_STORAGE_KEY);
+      if (savedProfile) {
+        applyTuningProfile(parseTuningProfileJson(savedProfile), { persist: false });
+      }
+    } catch (error) {
+      setCalibrationStatus(userFacingError("TUNING_IMPORT_INVALID", error, {
+        action: "load browser working copy",
+      }), "error");
+    }
+    return;
+  }
+
+  try {
+    tuningProfileStoragePath = await join(await appDataDir(), TUNING_PROFILE_FILE_NAME);
+  } catch (error) {
+    setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
+      action: "open automatic storage",
+    }), "error");
+    return;
+  }
+  if (tuningStorageNoteEl) {
+    tuningStorageNoteEl.textContent = "Changes are saved automatically inside MiiTuber.";
+    tuningStorageNoteEl.title = "MiiTuber keeps a private working copy in its app data.";
+  }
+
+  let bytes: Uint8Array;
+  try {
+    bytes = await readFile(tuningProfileStoragePath);
+  } catch (error) {
+    // A missing file is the normal first-run case; defaults remain active.
+    console.info("[MiiTuber] no saved app-data tuning profile found", { error });
+    return;
+  }
+
+  try {
+    const savedProfile = new TextDecoder().decode(bytes);
+    applyTuningProfile(parseTuningProfileJson(savedProfile), { persist: false });
+    console.info("[MiiTuber] loaded tuning profile from app data");
+  } catch (error) {
+    setCalibrationStatus(userFacingError("TUNING_IMPORT_INVALID", error, {
+      action: "load automatic working copy",
+    }), "error");
+  }
+}
+
+function scheduleTuningProfileSave() {
+  if (tuningSaveTimer !== null) window.clearTimeout(tuningSaveTimer);
+  tuningSaveTimer = window.setTimeout(() => {
+    tuningSaveTimer = null;
+    const json = serializeTuningProfile(tuningProfile);
+    tuningWriteQueue = tuningWriteQueue
+      .then(() => persistTuningProfile(json))
+      .catch((error) => {
+        setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
+          action: "automatic save",
+        }), "error");
+      });
+  }, TUNING_SAVE_DEBOUNCE_MS);
+}
+
+async function persistTuningProfile(json: string) {
+  if (!isRunningInTauri()) {
+    localStorage.setItem(TUNING_PROFILE_STORAGE_KEY, json);
+  } else {
+    const appDataPath = await appDataDir();
+    await mkdir(appDataPath, { recursive: true });
+    tuningProfileStoragePath ??= await join(appDataPath, TUNING_PROFILE_FILE_NAME);
+    await writeFile(tuningProfileStoragePath, new TextEncoder().encode(json));
+  }
+
+}
+
+saveProfileButton?.addEventListener("click", async () => {
   const json = serializeTuningProfile(tuningProfile);
+  if (isRunningInTauri()) {
+    try {
+      const path = await saveDialog({
+        title: "Save tuning profile",
+        defaultPath: TUNING_PROFILE_FILE_NAME,
+        filters: [{ name: "JSON profile", extensions: ["json"] }],
+      });
+      if (!path) return;
+      await writeFile(path, new TextEncoder().encode(json));
+      setCalibrationStatus("Saved a copy of your tuning profile.", "success");
+    } catch (error) {
+      setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
+        action: "save copy",
+      }), "error");
+    }
+    return;
+  }
+
   const url = URL.createObjectURL(
     new Blob([json], { type: "application/json;charset=utf-8" }),
   );
@@ -1235,23 +1741,47 @@ saveProfileButton?.addEventListener("click", () => {
   link.download = "miituber-tuning-profile.json";
   link.click();
   URL.revokeObjectURL(url);
-  setCalibrationStatus("Saved tuning profile JSON.", "success");
+  setCalibrationStatus("Saved a copy of your tuning profile.", "success");
 });
 
-loadProfileInput?.addEventListener("change", async () => {
-  const file = loadProfileInput.files?.[0];
-  if (!file) return;
-
+loadProfileButton?.addEventListener("click", async () => {
   try {
-    applyTuningProfile(parseTuningProfileJson(await file.text()));
-    setCalibrationStatus(`Loaded tuning profile from ${file.name}.`, "success");
+    let profileJson: string | null = null;
+    if (isRunningInTauri()) {
+      const selected = await openDialog({
+        title: "Import tuning profile",
+        multiple: false,
+        directory: false,
+        filters: [{ name: "JSON profile", extensions: ["json"] }],
+      });
+      if (typeof selected !== "string") return;
+      profileJson = new TextDecoder().decode(await readFile(selected));
+    } else {
+      const file = await chooseBrowserJsonFile();
+      if (!file) return;
+      profileJson = await file.text();
+    }
+
+    applyTuningProfile(parseTuningProfileJson(profileJson));
+    setCalibrationStatus("Imported your tuning profile.", "success");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    setCalibrationStatus(`Could not load profile: ${message}`, "error");
-  } finally {
-    loadProfileInput.value = "";
+    setCalibrationStatus(userFacingError("TUNING_IMPORT_INVALID", error, {
+      action: "import",
+    }), "error");
   }
 });
+
+function chooseBrowserJsonFile(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/json,.json";
+    input.addEventListener("change", () => resolve(input.files?.[0] ?? null), {
+      once: true,
+    });
+    input.click();
+  });
+}
 
 function populateTuningControls() {
   if (signalTuningControlsEl) {
@@ -1259,6 +1789,9 @@ function populateTuningControls() {
     for (const signalName of SIGNAL_NAMES) {
       signalTuningControlsEl.append(createSignalTuningRow(signalName));
     }
+  }
+  if (micMouthTuningControlEl) {
+    micMouthTuningControlEl.replaceChildren(createMicMouthTuningRow());
   }
 
   oneEuroSmoothingInput?.addEventListener("input", () => {
@@ -1278,38 +1811,72 @@ function populateTuningControls() {
     );
     applyTuningProfile(tuningProfile);
   });
-  lipSyncNoiseFloorInput?.addEventListener("change", () => {
-    tuningProfile.lipSync.noiseFloor = clampNumber(
-      lipSyncNoiseFloorInput.valueAsNumber,
+  renderTuningControls();
+}
+
+function createMicMouthTuningRow() {
+  const row = document.createElement("div");
+  row.className = "signal-tuning-row";
+
+  const label = document.createElement("strong");
+  label.textContent = "Mouth activation (microphone)";
+
+  const state = document.createElement("span");
+  state.className = "signal-state";
+  state.dataset.micMouthState = "true";
+  state.textContent = "off";
+
+  const header = document.createElement("div");
+  header.className = "signal-tuning-row__header";
+  header.append(label, state);
+
+  const rail = document.createElement("div");
+  rail.className = "threshold-rail";
+  rail.dataset.micMouthRail = "true";
+  rail.innerHTML = '<span class="threshold-band"></span><span class="threshold-marker threshold-marker--exit"></span><span class="threshold-marker threshold-marker--enter"></span><span class="threshold-score"></span>';
+
+  row.append(
+    header,
+    rail,
+    createMicMouthRangeInput("enter", "Enter"),
+    createMicMouthRangeInput("exit", "Exit"),
+    createMicMouthRangeInput("gain", "Gain"),
+  );
+  return row;
+}
+
+function createMicMouthRangeInput(
+  field: "enter" | "exit" | "gain",
+  labelText: string,
+) {
+  const label = document.createElement("label");
+  const labelTextEl = document.createElement("span");
+  labelTextEl.className = "signal-control-label";
+  labelTextEl.textContent = labelText;
+
+  const input = document.createElement("input");
+  input.type = "range";
+  input.step = "0.01";
+  input.min = "0";
+  input.max = field === "gain" ? "3" : "1";
+  input.dataset.micMouthField = field;
+  input.addEventListener("change", () => {
+    tuningProfile.lipSync.activation[field] = clampNumber(
+      input.valueAsNumber,
       0,
-      0.5,
+      field === "gain" ? 3 : 1,
     );
-    if (tuningProfile.lipSync.speakingLevel <= tuningProfile.lipSync.noiseFloor) {
-      tuningProfile.lipSync.speakingLevel = tuningProfile.lipSync.noiseFloor + 0.001;
+    if (tuningProfile.lipSync.activation.exit > tuningProfile.lipSync.activation.enter) {
+      tuningProfile.lipSync.activation.exit = tuningProfile.lipSync.activation.enter;
     }
     applyTuningProfile(tuningProfile);
   });
-  lipSyncSpeakingLevelInput?.addEventListener("change", () => {
-    tuningProfile.lipSync.speakingLevel = clampNumber(
-      Math.max(
-        lipSyncSpeakingLevelInput.valueAsNumber,
-        tuningProfile.lipSync.noiseFloor + 0.001,
-      ),
-      0.001,
-      1,
-    );
-    applyTuningProfile(tuningProfile);
-  });
-  lipSyncSmoothingInput?.addEventListener("change", () => {
-    tuningProfile.lipSync.smoothing = clampNumber(
-      lipSyncSmoothingInput.valueAsNumber,
-      0,
-      1,
-    );
-    applyTuningProfile(tuningProfile);
-  });
 
-  renderTuningControls();
+  const value = document.createElement("span");
+  value.className = "signal-control-value";
+  value.dataset.micMouthValue = field;
+  label.append(labelTextEl, input, value);
+  return label;
 }
 
 function createSignalTuningRow(signalName: SignalName) {
@@ -1346,11 +1913,16 @@ function createSignalTuningRow(signalName: SignalName) {
 }
 
 function signalTuningLabel(signalName: SignalName) {
-  if (signalName === "mouthOpen") {
-    return "mouthOpen (camera/mic)";
-  }
-
-  return signalName;
+  const labels: Record<SignalName, string> = {
+    mouthOpen: "Mouth open (camera)",
+    smile: "Smile",
+    blinkLeft: "Left eye blink",
+    blinkRight: "Right eye blink",
+    anger: "Anger",
+    sorrow: "Sadness",
+    surprise: "Surprise",
+  };
+  return labels[signalName];
 }
 
 function createSignalRangeInput(
@@ -1399,11 +1971,15 @@ function createSignalRangeInput(
   return label;
 }
 
-function applyTuningProfile(profile: TuningProfile) {
+function applyTuningProfile(
+  profile: TuningProfile,
+  options: { persist?: boolean } = {},
+) {
   tuningProfile = normalizeTuningProfile(profile);
   expressionPipeline.updateProfile(tuningProfile);
   lipSyncEnvelope.updateOptions(tuningProfile.lipSync);
   renderTuningControls();
+  if (options.persist !== false) scheduleTuningProfileSave();
 }
 
 function renderTuningControls() {
@@ -1417,15 +1993,12 @@ function renderTuningControls() {
   if (minimumHoldMsInput) {
     minimumHoldMsInput.value = String(tuningProfile.minimumHoldMs);
   }
-  if (lipSyncNoiseFloorInput) {
-    lipSyncNoiseFloorInput.value = String(tuningProfile.lipSync.noiseFloor);
-  }
-  if (lipSyncSpeakingLevelInput) {
-    lipSyncSpeakingLevelInput.value = String(tuningProfile.lipSync.speakingLevel);
-  }
-  if (lipSyncSmoothingInput) {
-    lipSyncSmoothingInput.value = String(tuningProfile.lipSync.smoothing);
-  }
+  micMouthTuningControlEl
+    ?.querySelectorAll<HTMLInputElement>("input[data-mic-mouth-field]")
+    .forEach((input) => {
+      const field = input.dataset.micMouthField as "enter" | "exit" | "gain";
+      input.value = String(tuningProfile.lipSync.activation[field]);
+    });
 
   signalTuningControlsEl
     ?.querySelectorAll<HTMLInputElement>("input[data-signal][data-field]")
@@ -1438,7 +2011,14 @@ function renderTuningControls() {
         input.value = String(tuningProfile.thresholds[signalName][field]);
       }
     });
-  renderSignalDebugState(latestExpressionScores, latestExpressionSignals);
+  renderSignalDebugState(
+    { ...latestExpressionScores, mouthOpen: latestCameraMouthScore },
+    { ...latestExpressionSignals, mouthOpen: latestCameraMouthSignal },
+  );
+  renderMicMouthTuningState(
+    latestMicrophoneMouthScore,
+    latestMicrophoneMouthSignal,
+  );
 }
 
 function easeHeadTowardNeutral(now: number) {
@@ -1472,6 +2052,7 @@ function handleTrackingFrame({ results, trackingFps, detectMs }: FaceTrackerFram
   const transformMatrix = matrixData ? new Float32Array(matrixData) : undefined;
 
   if (blendshapes.length === 0) {
+    avatarPoseCoordinator.markFaceMissing();
     easeHeadTowardNeutral(performance.now());
     renderBlendshapeBars([]);
     setTrackingStatus("Tracking, but no face is currently detected.", "idle");
@@ -1481,38 +2062,75 @@ function handleTrackingFrame({ results, trackingFps, detectMs }: FaceTrackerFram
   faceLostAt = null;
   const now = performance.now();
   updateCalibrationSession(blendshapes, now);
-  const pipelineFrame = expressionPipeline.processFrame(
-    blendshapes,
-    transformMatrix,
+  const pipelineFrame = avatarPoseCoordinator.updateCamera(
+    { blendshapes, transformMatrix, trackingFps, detectMs },
     now,
     getExternalMouthOpenScore(),
     getMouthOpenSource(),
   );
-  latestExpressionScores = pipelineFrame.rawMapped.scores;
-  latestExpressionSignals = pipelineFrame.signals;
-
-  const expressionIndex = applyExpressionPose(
-    pipelineFrame.expressionIndex,
-    pipelineFrame.headRotation,
-  );
-
-  setDebugValues(
-    expressionIndex,
-    formatChannels(pipelineFrame.mapped.channels),
-    pipelineFrame.remainingHoldMs,
-    pipelineFrame.headRotation,
-    trackingFps,
-    detectMs,
-    formatExpressionScores(pipelineFrame.mapped.scores),
-    formatTopBlendshapes(blendshapes),
-  );
-  renderSignalDebugState(pipelineFrame.rawMapped.scores, pipelineFrame.signals);
-  renderBlendshapeBars(blendshapes, pipelineFrame.smoothedBlendshapes);
+  const expressionIndex = applyCoordinatedAvatarPose(pipelineFrame, "camera");
 
   setTrackingStatus(
     `Tracking face at ${Math.round(trackingFps)} fps. Expression ${expressionLabel(expressionIndex)}.`,
     "success",
   );
+}
+
+/**
+ * Applies the latest camera and microphone inputs through one expression
+ * pipeline. Camera frames refresh the full face pose; microphone frames can
+ * independently refresh the mouth, including when the camera is stopped or
+ * temporarily cannot see a face.
+ */
+function applyCoordinatedAvatarPose(
+  pipelineFrame: ReturnType<AvatarPoseCoordinator["updateMicrophone"]>,
+  updateSource: "camera" | "microphone",
+) {
+  latestExpressionScores = pipelineFrame.rawMapped.scores;
+  latestExpressionSignals = pipelineFrame.signals;
+  latestCameraMouthScore = pipelineFrame.cameraMouthOpenScore;
+  latestCameraMouthSignal = pipelineFrame.cameraMouthOpenSignal;
+  latestMicrophoneMouthScore = pipelineFrame.microphoneMouthOpenScore;
+  latestMicrophoneMouthSignal = pipelineFrame.microphoneMouthOpenSignal;
+
+  // With no current face, retain the existing head pose. The camera's
+  // no-face path owns the hold/ease behavior; microphone updates only change
+  // the expression and must not snap the head back to an old camera matrix.
+  const headRotation =
+    updateSource === "microphone" && !avatarPoseCoordinator.isFaceDetected()
+      ? latestCleanOutputPose.headRotation
+      : pipelineFrame.headRotation;
+  const expressionIndex = applyExpressionPose(
+    pipelineFrame.expressionIndex,
+    headRotation,
+  );
+
+  const cameraDebug = avatarPoseCoordinator.getCameraDebugState();
+  setDebugValues(
+    expressionIndex,
+    formatChannels(pipelineFrame.mapped.channels),
+    pipelineFrame.remainingHoldMs,
+    headRotation,
+    cameraDebug.trackingFps,
+    cameraDebug.detectMs,
+    formatExpressionScores(pipelineFrame.mapped.scores),
+    formatTopBlendshapes(cameraDebug.blendshapes),
+  );
+  renderSignalDebugState(
+    { ...pipelineFrame.rawMapped.scores, mouthOpen: pipelineFrame.cameraMouthOpenScore },
+    { ...pipelineFrame.signals, mouthOpen: pipelineFrame.cameraMouthOpenSignal },
+  );
+  renderMicMouthTuningState(
+    pipelineFrame.microphoneMouthOpenScore,
+    pipelineFrame.microphoneMouthOpenSignal,
+  );
+  if (updateSource === "camera") {
+    renderBlendshapeBars(
+      cameraDebug.blendshapes,
+      pipelineFrame.smoothedBlendshapes,
+    );
+  }
+  return expressionIndex;
 }
 
 async function startLipSync() {
@@ -1547,6 +2165,14 @@ async function startLipSync() {
     updateLipSyncCalibrationSession(lipSyncRawRms, performance.now());
     lipSyncMouthScore = lipSyncEnvelope.update(samples);
     setLipSyncDebugValue(lipSyncMouthScore);
+    if (getMouthOpenSource() !== "camera") {
+      const pipelineFrame = avatarPoseCoordinator.updateMicrophone(
+        performance.now(),
+        getExternalMouthOpenScore(),
+        getMouthOpenSource(),
+      );
+      applyCoordinatedAvatarPose(pipelineFrame, "microphone");
+    }
     lipSyncAnimationId = requestAnimationFrame(update);
   };
   update();
@@ -1557,6 +2183,7 @@ async function startLipSync() {
 }
 
 function stopLipSync(message?: string) {
+  const microphoneWasDrivingMouth = getMouthOpenSource() !== "camera";
   if (lipSyncAnimationId !== null) {
     cancelAnimationFrame(lipSyncAnimationId);
     lipSyncAnimationId = null;
@@ -1572,6 +2199,14 @@ function stopLipSync(message?: string) {
   lipSyncEnvelope.reset();
   setLipSyncButtons(false);
   setLipSyncDebugValue(0);
+  if (microphoneWasDrivingMouth) {
+    const pipelineFrame = avatarPoseCoordinator.updateMicrophone(
+      performance.now(),
+      0,
+      getMouthOpenSource(),
+    );
+    applyCoordinatedAvatarPose(pipelineFrame, "microphone");
+  }
   void refreshMicrophoneList();
 
   if (message) setLipSyncStatus(message);
@@ -1613,26 +2248,6 @@ function getMouthOpenSource(): MouthOpenSource {
   return resolveMouthOpenSource(mouthSourceSelect?.value, lipSyncContext !== null);
 }
 
-function formatMicrophoneError(error: unknown) {
-  if (!(error instanceof Error)) return String(error);
-
-  switch (error.name) {
-    case "NotAllowedError":
-    case "PermissionDeniedError":
-      return "microphone permission was denied. Enable microphone access and try again.";
-    case "NotFoundError":
-    case "DevicesNotFoundError":
-      return "no microphone was found.";
-    case "NotReadableError":
-    case "TrackStartError":
-      return "the selected microphone is already in use or could not be started.";
-    case "SecurityError":
-      return "microphone access is blocked by the current security policy.";
-    default:
-      return error.message;
-  }
-}
-
 function updateCalibrationSession(blendshapes: BlendshapeCategory[], now: number) {
   if (!calibrationSession) return;
 
@@ -1654,7 +2269,6 @@ function updateCalibrationSession(blendshapes: BlendshapeCategory[], now: number
 }
 
 startTrackingButton?.addEventListener("click", () => {
-  prepareErrorSpeechAudio();
   void startTracking();
 });
 
@@ -1691,9 +2305,9 @@ async function startTracking() {
   } catch (error) {
     tracking = false;
     setTrackingButtons();
-    const message = formatTrackingError(error);
-    console.error("[MiiTuber] face tracking failed to start", { error, message });
-    setTrackingStatus(`Could not start webcam tracking: ${message}`, "error");
+    setTrackingStatus(userFacingError(mediaErrorCode("camera", error), error, {
+      action: "start tracking",
+    }), "error");
     speakError(miiCameraErrorLine(error));
   }
 }
@@ -1702,34 +2316,9 @@ function handleTrackingRuntimeError(error: unknown) {
   tracking = false;
   resetAvatarTrackingState();
   setTrackingButtons();
-  const message = formatTrackingError(error);
-  console.error("[MiiTuber] face tracking stopped after runtime error", {
-    error,
-    message,
-  });
-  setTrackingStatus(`Tracking stopped: ${message}`, "error");
-}
-
-function formatTrackingError(error: unknown) {
-  if (!(error instanceof Error)) return String(error);
-
-  switch (error.name) {
-    case "NotAllowedError":
-    case "PermissionDeniedError":
-      return "camera permission was denied. Enable camera access for this app and try again.";
-    case "NotFoundError":
-    case "DevicesNotFoundError":
-      return "no camera was found.";
-    case "NotReadableError":
-    case "TrackStartError":
-      return "the selected camera is already in use or could not be started.";
-    case "OverconstrainedError":
-      return "the selected camera could not satisfy the requested 640x480 video settings.";
-    case "SecurityError":
-      return "camera access is blocked by the current security policy.";
-    default:
-      return error.message;
-  }
+  setTrackingStatus(userFacingError(mediaErrorCode("camera", error), error, {
+    action: "tracking runtime",
+  }), "error");
 }
 
 stopTrackingButton?.addEventListener("click", () => {
@@ -1833,7 +2422,7 @@ function updateAvatarBackground() {
 
 function resetAvatarTrackingState() {
   faceLostAt = null;
-  expressionPipeline.reset();
+  avatarPoseCoordinator.reset();
   const expressionIndex = applyExpressionPose(FFLExpression.Normal, {
     pitch: 0,
     yaw: 0,
@@ -1848,7 +2437,12 @@ function resetAvatarTrackingState() {
   );
   latestExpressionScores = zeroExpressionScores();
   latestExpressionSignals = zeroExpressionSignals();
+  latestCameraMouthScore = 0;
+  latestCameraMouthSignal = false;
+  latestMicrophoneMouthScore = 0;
+  latestMicrophoneMouthSignal = false;
   renderSignalDebugState(latestExpressionScores, latestExpressionSignals);
+  renderMicMouthTuningState(0, false);
   renderBlendshapeBars([]);
 }
 
@@ -1888,6 +2482,33 @@ function renderSignalDebugState(
         }
       });
   }
+}
+
+function renderMicMouthTuningState(score: number, active: boolean) {
+  const activation = tuningProfile.lipSync.activation;
+  const stateEl = micMouthTuningControlEl?.querySelector<HTMLElement>(
+    "[data-mic-mouth-state]",
+  );
+  if (stateEl) {
+    stateEl.textContent = active ? "on" : "off";
+    stateEl.dataset.active = String(active);
+  }
+
+  const rail = micMouthTuningControlEl?.querySelector<HTMLElement>(
+    "[data-mic-mouth-rail]",
+  );
+  if (rail) {
+    rail.style.setProperty("--exit", String(activation.exit * 100));
+    rail.style.setProperty("--enter", String(activation.enter * 100));
+    rail.style.setProperty("--score", String(clamp01(score) * 100));
+  }
+
+  micMouthTuningControlEl
+    ?.querySelectorAll<HTMLElement>("[data-mic-mouth-value]")
+    .forEach((valueEl) => {
+      const field = valueEl.dataset.micMouthValue as "enter" | "exit" | "gain";
+      valueEl.textContent = activation[field].toFixed(2);
+    });
 }
 
 function nonNegativeInputValue(input: HTMLInputElement, fallback: number) {
@@ -2023,7 +2644,12 @@ function replayCurrentTour() {
 }
 
 function startTourIfNeeded(chapterId: TourChapterId) {
-  if (isCleanOutputWindow || activeTourChapterId === chapterId) return;
+  if (
+    isCleanOutputWindow ||
+    updateExperienceChecking ||
+    updateModalActive ||
+    activeTourChapterId === chapterId
+  ) return;
 
   const state = readTourState(getTourStorage());
   if (shouldAutoStart(chapterId, state)) {
@@ -2072,10 +2698,6 @@ function startTour(chapterId: TourChapterId) {
  */
 function speakError(line: MiiErrorLine) {
   getErrorSpeaker()?.speak(line);
-}
-
-function prepareErrorSpeechAudio() {
-  getErrorSpeaker()?.prepareAudio();
 }
 
 function getErrorSpeaker(): ErrorSpeaker | null {
@@ -2597,8 +3219,7 @@ async function handleImportFile() {
     }
   } catch (error) {
     pendingImport = null;
-    const message = error instanceof Error ? error.message : String(error);
-    setImportStatus(`Could not read file: ${message}`, "error");
+    setImportStatus(userFacingError("AVATAR_FILE_INVALID", error), "error");
   }
 }
 
@@ -2630,8 +3251,7 @@ function saveImportedAvatar() {
     closeImportModal();
     renderLibraryGrid();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    setImportStatus(`Could not save avatar: ${message}`, "error");
+    setImportStatus(userFacingError("AVATAR_SAVE_FAILED", error), "error");
   }
 }
 
@@ -2644,7 +3264,6 @@ function bytesToPngDataUrl(bytes: number[]): string {
 }
 
 async function selectAvatar(id: string) {
-  prepareErrorSpeechAudio();
   const avatar = getAvatar(getLibraryStorage(), id);
   if (!avatar) return;
 
@@ -2742,9 +3361,9 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
     setTrackingButtons();
     setOutputButtons();
     setCleanOutputMode(false);
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[MiiTuber] render_mii_glb failed", { name, error, message });
-    setStatus(message, "error");
+    setStatus(userFacingError("AVATAR_RENDER_FAILED", error, {
+      renderer: USE_FFL_JS ? "ffl.js" : "glb",
+    }), "error");
     speakError(miiAvatarLoadErrorLine());
   }
 }
