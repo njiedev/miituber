@@ -3,7 +3,7 @@
 <img width="1280" height="310" alt="New Project (1)" src="https://github.com/user-attachments/assets/047e1588-3a1e-4478-ae4e-c9119f5ce943" />
 
 NOTE(s):
-- Mii Creator(mii.nxw.pw) custom clothes currently do not work with Miituber. Researching it atm
+- Mii Creator(mii.nxw.pw) custom features currently do not work with Miituber. Researching it atm
 - The software does run on mac, but I do not have an Apple Developer Account at the moment. If you want to use it on mac read the **Building from source** part at the bottom.
 - Making contributor docs soon
 
