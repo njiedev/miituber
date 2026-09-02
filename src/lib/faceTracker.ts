@@ -197,7 +197,7 @@ export class FaceTracker {
         stream.getTracks().forEach((track) => track.stop());
         devices = await navigator.mediaDevices.enumerateDevices();
       } catch {
-        // Permission denied or no camera; fall through with what we have.
+        // Permission denied or no camera; continue with available device information.
       }
     }
 

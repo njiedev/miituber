@@ -61,8 +61,8 @@ async function getFflContext(): Promise<FFLContext> {
 }
 
 // Warm the FFL renderer at launch so the first-run "choose AFLResHigh_2_3.dat"
-// prompt lands on the reachable main-window toast. If we defer this until the
-// first render (importing a Mii), the prompt fires while the import modal's
+// prompt lands on the reachable main-window toast. Deferring until the first
+// render (importing a Mii) makes the prompt fire while the import modal's
 // scrim (z-index 100) is covering the toast (z-index 30), so the user can
 // never see or click it — the app just looks stuck on "Rendering a preview...".
 // Prompting up front also matches the documented first-run behaviour and
@@ -129,7 +129,7 @@ async function tryFetchPublicFflResource(): Promise<ArrayBuffer | null> {
 
 // The Mii resource file is a hard prerequisite: without AFLResHigh_2_3.dat the
 // app can't render anything, so a new user can't even add their first Mii (the
-// import flow renders a preview). So when it's missing we put up a blocking,
+// import flow renders a preview). When it is missing, the app shows a blocking,
 // non-dismissable first-run gate OVER the library — the user must supply the
 // file before they can reach anything else.
 async function promptForFflResource(): Promise<ArrayBuffer> {
@@ -1178,8 +1178,8 @@ async function initializeMainWindow() {
   void initializeUpdateExperience();
   void refreshMicrophoneList();
   // Warm the renderer first: on first run this raises the blocking resource
-  // gate. Only once the gate is cleared (resource present) do we start the
-  // library tour, so the tour never appears behind the gate.
+  // gate. The library tour starts only after the resource is present, keeping
+  // the tour from appearing behind the gate.
   void prewarmFflRenderer().then(() => {
     rendererPrewarmFinished = true;
     startTourIfNeeded("library");

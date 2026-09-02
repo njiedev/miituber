@@ -1,5 +1,5 @@
-// Minimal ambient declarations for the subset of ariankordi/FFL.js we use.
-// FFL.js ships JSDoc but no bundled .d.ts, so we declare the surface ourselves.
+// Minimal ambient declarations for the subset of ariankordi/FFL.js used by MiiTuber.
+// FFL.js ships JSDoc but no bundled .d.ts, so this file declares the required surface.
 // If FFL.js later ships types, delete this file.
 declare module "ffl.js" {
   import type * as THREE from "three";
@@ -39,7 +39,7 @@ declare module "ffl.js" {
     expressions: number | number[],
   ): Uint32Array;
 
-  /** Subset of decoded Mii parameters (CharInfo) we read for body rendering. */
+  /** Subset of decoded Mii parameters (CharInfo) required for body rendering. */
   export type FFLiCharInfo = {
     /** 0 = male, 1 = female — selects which base body mesh to use. */
     gender: number;
