@@ -8,7 +8,7 @@ export type { FFLContext } from "ffl.js";
  *
  * Wraps FFL.js initialization behind a single lazy `ensureReady()` promise so
  * the rest of the app never touches the WASM/resource lifecycle directly. This
- * is the seam that replaces the external `127.0.0.1:5000` FFL server.
+ * is the shared seam used by every Mii-rendering view.
  *
  * FFL.js (and its Emscripten WASM module) are imported *dynamically* — they load
  * only when FFL is first used, keeping app boot light and keeping this module

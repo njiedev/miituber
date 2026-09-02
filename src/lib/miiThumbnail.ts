@@ -10,11 +10,8 @@ import {
 /**
  * In-process Mii thumbnail rendering.
  *
- * Replaces the Tauri `render_mii_png` command for library/import previews —
- * that command still POSTs to the retired external `127.0.0.1:5000` FFL
- * server, so it fails for every new import. This renders the full body with
- * the same FFL.js pipeline the live workspace uses, on a throwaway transparent
- * offscreen canvas.
+ * Renders the full body with the same FFL.js pipeline the live workspace and
+ * clean-output window use, on a throwaway transparent offscreen canvas.
  */
 const THUMBNAIL_SIZE = 256;
 

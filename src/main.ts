@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
@@ -37,12 +36,6 @@ import {
   shouldShowReleaseNotes,
 } from "./lib/releaseNotes";
 
-/**
- * When true, render Miis in-process via FFL.js instead of the external
- * `127.0.0.1:5000` GLB server. Flip to false to fall back to the Rust/HTTP path.
- */
-const USE_FFL_JS = true;
-
 // Bundled assets served from Vite's public/ dir.
 // NOTE: shipping should load a user-supplied .dat from disk instead of bundling
 // it (see docs/research/roadmap.md Phase 2 — do not redistribute Nintendo data).
@@ -75,7 +68,6 @@ async function getFflContext(): Promise<FFLContext> {
 // Prompting up front also matches the documented first-run behaviour and
 // warms the WASM before the user needs it.
 async function prewarmFflRenderer(): Promise<void> {
-  if (!USE_FFL_JS) return;
   try {
     await getFflContext();
   } catch (error) {
@@ -306,6 +298,7 @@ const LEGACY_INSTALL_STORAGE_KEYS = [
 ] as const;
 const CLEAN_OUTPUT_AVATAR_EVENT = "clean-output-avatar";
 const CLEAN_OUTPUT_BACKGROUND_EVENT = "clean-output-background";
+const CLEAN_OUTPUT_BODY_VISIBILITY_EVENT = "clean-output-body-visibility";
 const CLEAN_OUTPUT_POSE_EVENT = "clean-output-pose";
 const CLEAN_OUTPUT_READY_EVENT = "clean-output-ready";
 const CLEAN_OUTPUT_HIDDEN_EVENT = "clean-output-hidden";
@@ -557,6 +550,7 @@ type CleanOutputPosePayload = {
 
 type CleanOutputAvatarPayload = CleanOutputStoredAvatar & {
   background: CleanOutputBackgroundPayload;
+  bodyVisible: boolean;
   pose: CleanOutputPosePayload;
 };
 
@@ -1227,6 +1221,9 @@ async function initializeCleanOutputWindow() {
       applyCleanOutputBackground(event.payload);
     },
   );
+  await listen<boolean>(CLEAN_OUTPUT_BODY_VISIBILITY_EVENT, (event) => {
+    avatarScene.setBodyVisible(event.payload);
+  });
   await listen<CleanOutputPosePayload>(CLEAN_OUTPUT_POSE_EVENT, (event) => {
     applyCleanOutputPose(event.payload);
   });
@@ -1243,6 +1240,7 @@ async function initializeCleanOutputWindow() {
     void loadCleanOutputAvatar({
       ...storedAvatar,
       background: { color: "#e8f0f7", transparent: true },
+      bodyVisible: readBodyVisiblePreference(),
       pose: latestCleanOutputPose,
     });
   }, 300);
@@ -1314,6 +1312,7 @@ async function publishCleanOutputAvatarSnapshot() {
     {
       ...avatar,
       background: readCurrentBackground(),
+      bodyVisible: readBodyVisiblePreference(),
       pose: latestCleanOutputPose,
     },
   );
@@ -1327,6 +1326,17 @@ function publishCleanOutputBackground() {
     CLEAN_OUTPUT_WINDOW_LABEL,
     CLEAN_OUTPUT_BACKGROUND_EVENT,
     readCurrentBackground(),
+  );
+}
+
+function publishCleanOutputBodyVisibility(visible: boolean) {
+  if (isCleanOutputWindow) return;
+  if (!cleanOutputMode) return;
+
+  void emitTo<boolean>(
+    CLEAN_OUTPUT_WINDOW_LABEL,
+    CLEAN_OUTPUT_BODY_VISIBILITY_EVENT,
+    visible,
   );
 }
 
@@ -1345,10 +1355,12 @@ async function loadCleanOutputAvatar(payload: CleanOutputAvatarPayload) {
   try {
     cleanOutputAvatarLoaded = true;
     applyCleanOutputBackground(payload.background);
-    const glbBytes = await invoke<number[]>("render_mii_glb", {
-      miiBytes: payload.bytes,
-    });
-    await avatarScene.loadModelFromGlbBytes(glbBytes);
+    avatarScene.setBodyVisible(payload.bodyVisible);
+    const ffl = await getFflContext();
+    await avatarScene.loadModelFromMiiBytes(
+      normalizeMiiBytes(new Uint8Array(payload.bytes)),
+      ffl,
+    );
     applyCleanOutputPose(payload.pose);
     if (emptyPreviewEl) emptyPreviewEl.hidden = true;
     setStatus(`OBS Clean View rendering ${payload.name}.`, "success");
@@ -1542,6 +1554,7 @@ bodyVisibleInput?.addEventListener("change", () => {
   const visible = bodyVisibleInput.checked;
   avatarScene.setBodyVisible(visible);
   writeBodyVisiblePreference(visible);
+  publishCleanOutputBodyVisibility(visible);
   logRenderEvent("body visibility toggled", { visible });
 });
 
@@ -3195,15 +3208,9 @@ async function handleImportFile() {
         error,
         message,
       });
-      if (USE_FFL_JS) {
-        // Same renderer the workspace uses — if it rejects the bytes here,
-        // the avatar would never load. Fail the import instead of saving it.
-        throw error;
-      }
-      setImportStatus(
-        "Renderer unavailable; saving without a thumbnail. It will generate on first use.",
-        "idle",
-      );
+      // Same renderer the workspace uses — if it rejects the bytes here,
+      // the avatar would never load. Fail the import instead of saving it.
+      throw error;
     }
 
     pendingImport = { bytes, thumbnailDataUrl };
@@ -3255,14 +3262,6 @@ function saveImportedAvatar() {
   }
 }
 
-function bytesToPngDataUrl(bytes: number[]): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return `data:image/png;base64,${btoa(binary)}`;
-}
-
 async function selectAvatar(id: string) {
   const avatar = getAvatar(getLibraryStorage(), id);
   if (!avatar) return;
@@ -3288,43 +3287,24 @@ async function backfillThumbnail(id: string, bytes: number[]) {
   }
 }
 
-/**
- * Renders a library/import thumbnail with whichever renderer is active. The
- * Tauri `render_mii_png` fallback needs the external FFL server and only
- * exists for the non-FFL.js debug path.
- */
 async function renderMiiThumbnail(miiBytes: Uint8Array): Promise<string> {
-  if (USE_FFL_JS) {
-    const ffl = await getFflContext();
-    return renderMiiThumbnailDataUrl(ffl, miiBytes);
-  }
-
-  const pngBytes = await invoke<number[]>("render_mii_png", {
-    miiBytes: Array.from(miiBytes),
-  });
-  return bytesToPngDataUrl(pngBytes);
+  const ffl = await getFflContext();
+  return renderMiiThumbnailDataUrl(ffl, miiBytes);
 }
 
 async function renderAvatarBytes(miiBytes: number[], name: string) {
   try {
-    let loadResult;
-    if (USE_FFL_JS) {
-      // Resolve the FFL context FIRST. If AFLResHigh_2_3.dat is missing this
-      // blocks on the "choose the resource file" prompt, which owns the red
-      // status message + Choose-file button. Setting a "Rendering..." status
-      // before this resolves would clobber that prompt, leaving the user staring
-      // at a spinner with no idea they still need to pick the resource file.
-      const ffl = await getFflContext();
-      setStatus("Rendering with in-process FFL.js...");
-      loadResult = await avatarScene.loadModelFromMiiBytes(
-        normalizeMiiBytes(new Uint8Array(miiBytes)),
-        ffl,
-      );
-    } else {
-      setStatus("Requesting GLB from the local FFL renderer...");
-      const glbBytes = await invoke<number[]>("render_mii_glb", { miiBytes });
-      loadResult = await avatarScene.loadModelFromGlbBytes(glbBytes);
-    }
+    // Resolve the FFL context FIRST. If AFLResHigh_2_3.dat is missing this
+    // blocks on the "choose the resource file" prompt, which owns the red
+    // status message + Choose-file button. Setting a "Rendering..." status
+    // before this resolves would clobber that prompt, leaving the user staring
+    // at a spinner with no idea they still need to pick the resource file.
+    const ffl = await getFflContext();
+    setStatus("Rendering with in-process FFL.js...");
+    const loadResult = await avatarScene.loadModelFromMiiBytes(
+      normalizeMiiBytes(new Uint8Array(miiBytes)),
+      ffl,
+    );
     saveCleanOutputAvatar({ name, bytes: miiBytes });
     const expressionIndex = applyExpressionPose(FFLExpression.Normal, {
       pitch: 0,
@@ -3344,7 +3324,7 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
 
     logRenderEvent("avatar render succeeded", {
       name,
-      renderer: USE_FFL_JS ? "ffl.js" : "glb-server",
+      renderer: "ffl.js",
       ...loadResult,
     });
     if (emptyPreviewEl) emptyPreviewEl.hidden = true;
@@ -3352,7 +3332,7 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
     setTrackingStatus(
       loadResult.expressionCount > 0
         ? "Ready to start webcam tracking."
-        : "Tracking needs expression variants; this GLB can be inspected manually but cannot drive expressions.",
+        : "Tracking needs supported avatar expressions.",
       loadResult.expressionCount > 0 ? "success" : "error",
     );
   } catch (error) {
@@ -3362,7 +3342,7 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
     setOutputButtons();
     setCleanOutputMode(false);
     setStatus(userFacingError("AVATAR_RENDER_FAILED", error, {
-      renderer: USE_FFL_JS ? "ffl.js" : "glb",
+      renderer: "ffl.js",
     }), "error");
     speakError(miiAvatarLoadErrorLine());
   }

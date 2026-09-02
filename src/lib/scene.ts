@@ -1,7 +1,5 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import type { CharModel, FFLContext } from "ffl.js";
 import type { BodyModel } from "ffl.js/helpers/BodyUtilities.js";
 import type { HeadRotation } from "./types";
@@ -13,11 +11,6 @@ import { attachBodyToCharModel, computeVisualBox } from "./bodyModel";
 const FFL_SUPPORTED_EXPRESSION_COUNT = Object.values(FFLExpression).filter(
   (value): value is FFLExpression => typeof value === "number",
 ).length;
-
-type VariantMapping = {
-  material: number;
-  variants: number[];
-};
 
 type MeshWithMaterial = THREE.Mesh<
   THREE.BufferGeometry,
@@ -41,16 +34,6 @@ export type AvatarBackground = {
   transparent: boolean;
 };
 
-export function expressionIndexFromVariantName(name: unknown): number | null {
-  if (typeof name !== "string") return null;
-
-  const match = /^Expression_(\d+)$/.exec(name);
-  if (!match) return null;
-
-  const index = Number(match[1]);
-  return Number.isInteger(index) ? index : null;
-}
-
 /**
  * Where the camera looks, as a fraction up the model's bounding box (0 = feet,
  * 1 = top of head). 0.5 centers the whole body vertically in the frame.
@@ -66,10 +49,8 @@ export class AvatarScene {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(35, 1, 0.01, 100);
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly loader = new GLTFLoader();
   private readonly modelRoot = new THREE.Group();
   private readonly controls: OrbitControls;
-  private readonly variantMaterials = new Map<number, THREE.Material>();
 
   private currentModel: THREE.Object3D | null = null;
   private charModel: CharModel | null = null;
@@ -78,8 +59,6 @@ export class AvatarScene {
   private headRoot: THREE.Object3D | null = null;
   /** Captured disposeModel() from BodyUtilities so sync teardown can use it. */
   private disposeBodyModelFn: ((model: THREE.Object3D) => void) | null = null;
-  private currentGlbUrl: string | null = null;
-  private variantMesh: MeshWithMaterial | null = null;
   private bodyVisible = true;
   private renderFrameCount = 0;
   private lastRenderFpsAt = performance.now();
@@ -109,8 +88,6 @@ export class AvatarScene {
   ) {
     this.scene.background = AvatarScene.DEFAULT_BACKGROUND;
     this.scene.add(this.modelRoot);
-    // The Wii U body GLB is meshopt-compressed (EXT_meshopt_compression).
-    this.loader.setMeshoptDecoder(MeshoptDecoder);
 
     this.camera.position.set(0, 0.05, 3);
 
@@ -141,57 +118,22 @@ export class AvatarScene {
     this.animate();
   }
 
-  async loadModelFromGlbBytes(bytes: number[]): Promise<AvatarLoadResult> {
-    this.disposeCurrentModel();
-    this.variantMaterials.clear();
-    this.variantMesh = null;
-
-    const blob = new Blob([new Uint8Array(bytes)], { type: "model/gltf-binary" });
-    this.currentGlbUrl = URL.createObjectURL(blob);
-
-    const gltf = await this.loader.loadAsync(this.currentGlbUrl);
-    this.currentModel = gltf.scene;
-
-    let meshCount = 0;
-    this.currentModel.traverse((child) => {
-      const mesh = child as MeshWithMaterial;
-
-      if (!mesh.isMesh) return;
-      meshCount += 1;
-      mesh.frustumCulled = false;
-    });
-
-    await this.cacheVariantMaterials(gltf);
-    const framing = this.frameModel(this.currentModel);
-    this.modelRoot.add(this.currentModel);
-    this.setExpression(0);
-
-    return {
-      meshCount,
-      expressionCount: this.variantMaterials.size,
-      ...framing,
-    };
-  }
-
   /**
-   * Render a Mii directly from its raw bytes via in-process FFL.js, bypassing
-   * the external GLB server. `ensureReady()` (fflRenderer) must have resolved;
-   * pass its `FFLContext` handle in as `ffl`.
+   * Render a Mii from its raw bytes via FFL.js. `ensureReady()` in
+   * fflRenderer must have resolved; pass its `FFLContext` handle in as `ffl`.
    */
   async loadModelFromMiiBytes(
     miiBytes: Uint8Array,
     ffl: FFLContext,
   ): Promise<AvatarLoadResult> {
     this.disposeCurrentModel();
-    this.variantMaterials.clear();
-    this.variantMesh = null;
 
     const charModel = await createCharModel(ffl, miiBytes, this.renderer);
     this.charModel = charModel;
 
     // Attach a scaled body; the head is parented onto its neck bone, so the
     // body's root is what gets added to the scene and framed.
-    const attached = await attachBodyToCharModel(charModel, this.loader);
+    const attached = await attachBodyToCharModel(charModel);
     this.bodyModel = attached.body;
     this.currentModel = attached.body.model;
     this.headRoot = attached.headRoot;
@@ -224,17 +166,7 @@ export class AvatarScene {
   }
 
   setExpression(index: number) {
-    if (this.charModel) {
-      this.charModel.setExpression(index);
-      return;
-    }
-
-    if (!this.variantMesh) return;
-
-    const material = this.variantMaterials.get(index);
-    if (material) {
-      this.variantMesh.material = material;
-    }
+    this.charModel?.setExpression(index);
   }
 
   setHeadRotation(rotation: HeadRotation) {
@@ -329,42 +261,6 @@ export class AvatarScene {
     if (this.hasFraming) this.applyFraming();
   }
 
-  private async cacheVariantMaterials(gltf: GLTF) {
-    const variantNames = gltf.parser.json.extensions?.KHR_materials_variants?.variants;
-
-    if (!Array.isArray(variantNames)) return;
-
-    const materialPromises: Promise<void>[] = [];
-
-    gltf.scene.traverse((child) => {
-      const mesh = child as MeshWithMaterial;
-      const mappings = mesh.userData.gltfExtensions?.KHR_materials_variants
-        ?.mappings as VariantMapping[] | undefined;
-
-      if (!mesh.isMesh || !Array.isArray(mappings) || mappings.length === 0) return;
-
-      this.variantMesh = mesh;
-
-      for (const mapping of mappings) {
-        for (const variantIndex of mapping.variants) {
-          const variantName = variantNames[variantIndex]?.name;
-          const expressionIndex = expressionIndexFromVariantName(variantName);
-
-          if (expressionIndex === null) continue;
-
-          materialPromises.push(
-            gltf.parser.getDependency("material", mapping.material).then((material) => {
-              this.variantMaterials.set(expressionIndex, material as THREE.Material);
-            }),
-          );
-        }
-      }
-    });
-
-    await Promise.all(materialPromises);
-  }
-
-
   private frameModel(model: THREE.Object3D) {
     // Frame by moving the camera, NOT by rescaling the model. The FFL body rig
     // is authored in a native ~100-unit space and the head is attached via the
@@ -440,23 +336,8 @@ export class AvatarScene {
       this.charModel = null;
       this.currentModel = null;
       this.headRoot = null;
+      this.disposeBodyModelFn = null;
       return;
-    }
-
-    if (!this.currentModel) return;
-
-    this.modelRoot.remove(this.currentModel);
-    this.currentModel.traverse((child) => {
-      const mesh = child as MeshWithMaterial;
-
-      if (!mesh.isMesh) return;
-      mesh.geometry.dispose();
-    });
-    this.currentModel = null;
-
-    if (this.currentGlbUrl) {
-      URL.revokeObjectURL(this.currentGlbUrl);
-      this.currentGlbUrl = null;
     }
   }
 
