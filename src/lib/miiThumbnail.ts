@@ -35,7 +35,9 @@ export async function renderMiiThumbnailDataUrl(
   try {
     renderer.setPixelRatio(1);
     renderer.setSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE, false);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Correct colors to sRGB space.
+    THREE.ColorManagement.enabled = false;
+    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     renderer.setClearColor(0x000000, 0);
 
     charModel = await createCharModel(ffl, miiBytes, renderer);

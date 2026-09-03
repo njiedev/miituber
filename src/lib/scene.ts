@@ -97,7 +97,9 @@ export class AvatarScene {
       canvas,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Correct colors to sRGB space.
+    THREE.ColorManagement.enabled = false;
+    this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.4);
     keyLight.position.set(1.8, 2.5, 2.6);
