@@ -1,7 +1,7 @@
 import type * as THREE from "three";
-import type { CharModel, FFLContext } from "ffl.js";
+import type { CharModel, FFL as FFLContext } from "ffl.js";
 
-export type { FFLContext } from "ffl.js";
+export type { FFLContext };
 
 /**
  * In-process FFL renderer.
