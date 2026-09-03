@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "release:check": "node scripts/prepare-release.mjs",
     "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri"

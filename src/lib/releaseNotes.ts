@@ -7,29 +7,25 @@ export type ReleaseNotes = {
 };
 
 /**
- * Add one entry when preparing each release. Keep the reusable modal code in
- * main.ts unchanged; release-specific words and art belong here.
+ * Add one JSON file under release-notes/ when preparing each release. Vite
+ * bundles every version for the in-app modal, while the release workflow reads
+ * the current version's same file for the GitHub release body.
  *
  * Replace public/update-modal-mii.png with the desired bundled PNG before a
  * release. This path is intentionally independent from saved avatar data.
  */
-export const RELEASE_NOTES: Readonly<Record<string, ReleaseNotes>> = {
-  "0.2.0": {
-    version: "0.2.0",
-    title: "What’s New in MiiTuber 0.2.0",
-    items: [
-      "Added microphone-only animation for camera-free PNGTuber use.",
-      "Added separate camera and microphone mouth activation controls.",
-      "Added native Save JSON and Import JSON controls for tuning profiles.",
-      "Fixed a bug where microphone lip-sync would not move the Mii without the camera running.",
-      "Fixed a bug where losing face detection could stop microphone mouth movement.",
-      "Fixed a bug where selecting a Mii could play a brief dialogue sound with no dialogue visible.",
-      "Fixed a bug where starting microphone or camera tracking could play a brief dialogue sound.",
-    ],
-    footer: `Thanks for 200 downloads! — 3wb <3\n\nNOTE: Mii Creator's new update brings features that will most likely not be compatible with MiiTuber. Avoid using custom Mii Creator features on Miis while I work on a fix.`,
-    imageUrl: "/update-modal-mii.png",
-  },
-};
+const releaseNoteModules = import.meta.glob<{ default: ReleaseNotes }>(
+  "../../release-notes/*.json",
+  { eager: true },
+);
+
+export const RELEASE_NOTES: Readonly<Record<string, ReleaseNotes>> =
+  Object.fromEntries(
+    Object.values(releaseNoteModules).map(({ default: notes }) => [
+      notes.version,
+      notes,
+    ]),
+  );
 
 export function releaseNotesForVersion(version: string): ReleaseNotes | null {
   return RELEASE_NOTES[version] ?? null;

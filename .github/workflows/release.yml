@@ -1,15 +1,58 @@
 name: Release
 
-# Fires ONLY when you push a version tag like v0.2.0 — never on a normal commit.
-# That tag push is the deliberate "cut a release" act; ordinary commits to main
-# do nothing here.
+# Run this workflow manually to cut the version currently declared by the app.
+# Pushing a matching v* tag manually remains supported as a fallback.
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      name: ${{ steps.release.outputs.name }}
+      body: ${{ steps.release.outputs.body }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate version and prepare release notes
+        id: release
+        run: node scripts/prepare-release.mjs
+
+      - name: Create version tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          existing_commit="$(git rev-list -n 1 "$RELEASE_TAG" 2>/dev/null || true)"
+          if [ -n "$existing_commit" ]; then
+            if [ "$existing_commit" != "$GITHUB_SHA" ]; then
+              echo "Tag $RELEASE_TAG already points to $existing_commit, not $GITHUB_SHA."
+              exit 1
+            fi
+            echo "Tag $RELEASE_TAG already points to this commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$RELEASE_TAG" "$GITHUB_SHA" -m "Release $RELEASE_TAG"
+          git push origin "$RELEASE_TAG"
+
   release:
+    needs: prepare
     permissions:
       # tauri-action needs write access to create the GitHub Release + upload assets.
       contents: write
@@ -17,14 +60,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The 0.2.0 release remains Windows-only while public macOS signing
-          # and notarization are deferred. macOS transparency support remains
-          # in the application for local testing and a future Mac release.
+          # Public macOS signing and notarization are deferred. macOS
+          # transparency support remains available for local testing.
           - platform: "windows-latest"
             args: ""
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Always build the exact commit selected by the validated version tag.
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - name: Install Node
         uses: actions/setup-node@v4
@@ -47,29 +92,13 @@ jobs:
         env:
           # Provided automatically by GitHub — lets the action create the Release.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Your updater signing key (Part A). Bundles are signed from day one so
-          # they're update-ready the moment you wire the in-app updater.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          # Use the tag that triggered the run (e.g. v0.2.0) as the release tag.
-          tagName: ${{ github.ref_name }}
-          releaseName: "MiiTuber ${{ github.ref_name }}"
-          releaseBody: |
-            ## What’s New in MiiTuber 0.2.0
-
-            - Added microphone-only animation for camera-free PNGTuber use.
-            - Added separate camera and microphone mouth activation controls.
-            - Added native Save JSON and Import JSON controls for tuning profiles.
-            - Fixed a bug where microphone lip-sync would not move the Mii without camera tracking.
-            - Fixed a bug where losing face detection could stop microphone mouth movement.
-            - Fixed a bug where selecting a Mii could play dialogue audio with no dialogue visible.
-            - Fixed a bug where starting microphone or camera tracking could play dialogue audio.
-
-            Thanks for 200 downloads! — 3wb <3
-
-            **Compatibility note:** Mii Creator's new update includes custom features that may not yet work with MiiTuber. Avoid those custom features while compatibility work is underway.
-          # Publish as a DRAFT so you review/edit notes before it goes public.
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: ${{ needs.prepare.outputs.name }}
+          releaseBody: ${{ needs.prepare.outputs.body }}
+          # Keep the release as a draft for review before publication.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
