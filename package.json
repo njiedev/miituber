@@ -22,7 +22,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "@types/three": "^0.184.1",
-    "ffl.js": "github:ariankordi/FFL.js#v2.2.0",
+    "ffl.js": "github:ariankordi/FFL.js#v2.2.2",
     "three": "^0.184.0"
   },
   "devDependencies": {
