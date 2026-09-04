@@ -2,15 +2,11 @@ import * as THREE from "three";
 import type { CharModel } from "ffl.js";
 import { createCharModel, type FFLContext } from "./fflRenderer";
 import {
-  getFaceCamera,
   adjustCameraForBodyHead,
-  BodyModel
+  getFaceCamera,
+  type BodyModel,
 } from "ffl.js/helpers/BodyUtilities.js";
-import {
-  attachBodyToCharModel,
-  computeVisualBox,
-  type AttachedBody,
-} from "./bodyModel";
+import { attachBodyToCharModel, type AttachedBody } from "./bodyModel";
 
 /**
  * In-process Mii thumbnail rendering.
@@ -63,7 +59,7 @@ export async function renderMiiThumbnailDataUrl(
 
     renderer.render(
       scene,
-      createThumbnaiclCamera(attachedBody.headRoot, attachedBody.body),
+      createThumbnailCamera(attachedBody.body),
     );
     return canvas.toDataURL("image/png");
   } finally {
@@ -76,10 +72,7 @@ export async function renderMiiThumbnailDataUrl(
   }
 }
 
-function createThumbnaiclCamera(
-  head: THREE.Object3D,
-  body: BodyModel,
-) {
+function createThumbnailCamera(body: BodyModel) {
   const camera = getFaceCamera();
   camera.fov = 50; // Adjust FOV to look more visually distinct.
   camera.near = 10;

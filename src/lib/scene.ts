@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { CharModel, FFLContext } from "ffl.js";
+import type { CharModel } from "ffl.js";
 import type { BodyModel } from "ffl.js/helpers/BodyUtilities.js";
 import type { HeadRotation } from "./types";
 import { FFLExpression } from "./types";
-import { createCharModel } from "./fflRenderer";
+import { createCharModel, type FFLContext } from "./fflRenderer";
 import { attachBodyToCharModel, computeVisualBox } from "./bodyModel";
 
 /** Count of expressions FFL.js can render on demand (CharModel needs no pre-bake). */
