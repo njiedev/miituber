@@ -2,6 +2,11 @@ import * as THREE from "three";
 import type { CharModel } from "ffl.js";
 import { createCharModel, type FFLContext } from "./fflRenderer";
 import {
+  getFaceCamera,
+  adjustCameraForBodyHead,
+  BodyModel
+} from "ffl.js/helpers/BodyUtilities.js";
+import {
   attachBodyToCharModel,
   computeVisualBox,
   type AttachedBody,
@@ -35,7 +40,9 @@ export async function renderMiiThumbnailDataUrl(
   try {
     renderer.setPixelRatio(1);
     renderer.setSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE, false);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Correct colors to sRGB space.
+    THREE.ColorManagement.enabled = false;
+    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     renderer.setClearColor(0x000000, 0);
 
     charModel = await createCharModel(ffl, miiBytes, renderer);
@@ -56,7 +63,7 @@ export async function renderMiiThumbnailDataUrl(
 
     renderer.render(
       scene,
-      createThumbnaiclCamera(attachedBody.headRoot, attachedBody.body.model),
+      createThumbnaiclCamera(attachedBody.headRoot, attachedBody.body),
     );
     return canvas.toDataURL("image/png");
   } finally {
@@ -71,45 +78,17 @@ export async function renderMiiThumbnailDataUrl(
 
 function createThumbnaiclCamera(
   head: THREE.Object3D,
-  body: THREE.Object3D,
-): THREE.PerspectiveCamera {
-  head.updateWorldMatrix(true, true);
-  body.updateWorldMatrix(true, true);
-
-  const headBox = computeVisualBox(head);
-  const bodyBox = computeVisualBox(body);
-  const headCenter = new THREE.Vector3();
-  const headSize = new THREE.Vector3();
-  const bodySize = new THREE.Vector3();
-  headBox.getCenter(headCenter);
-  headBox.getSize(headSize);
-  bodyBox.getSize(bodySize);
-
-  const shoulderDepth = Math.max(headSize.y * 0.12, bodySize.y * 0.03);
-  const topMargin = headSize.y * 0.05;
-  const bottom = Math.max(bodyBox.min.y, headBox.min.y - shoulderDepth);
-  const box = new THREE.Box3(
-    new THREE.Vector3(headBox.min.x, bottom, headBox.min.z),
-    new THREE.Vector3(headBox.max.x, headBox.max.y + topMargin, headBox.max.z),
-  );
-  const center = new THREE.Vector3();
-  const size = new THREE.Vector3();
-  box.getCenter(center);
-  box.getSize(size);
-
-  const camera = new THREE.PerspectiveCamera(28, 1, 0.01, 100);
-  const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
-  const fitHeight = size.y / 2 / tan;
-  const fitWidth = size.x / 2 / tan;
-  const distance = Math.max(fitHeight, fitWidth, 0.01) * 1.02;
-  const target = center.clone();
-  target.x = headCenter.x;
-
-  camera.position.set(target.x, target.y, center.z + distance);
-  camera.near = distance / 100;
-  camera.far = distance * 100;
-  camera.lookAt(target);
-  camera.updateProjectionMatrix();
+  body: BodyModel,
+) {
+  const camera = getFaceCamera();
+  camera.fov = 50; // Adjust FOV to look more visually distinct.
+  camera.near = 10;
+  camera.far = 10000;
+  camera.updateProjectionMatrix(); // Apply new FOV.
+  // Bring camera back a little bit.
+  camera.position.y -= 0.7;
+  camera.position.z -= 40;
+  adjustCameraForBodyHead(camera, body);
 
   return camera;
 }

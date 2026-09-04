@@ -7,13 +7,6 @@ import type { BodyModel } from "ffl.js/helpers/BodyUtilities.js";
 /** Body GLBs live in public/body/ and are served from the web root. */
 export const BODY_MODEL_URLS = ["/body/male.glb", "/body/female.glb"] as const;
 
-/**
- * Vertical seat adjustment for the head, in FFL head units (pre-pivot-scale).
- * attachHeadToBody pins the pivot to the body's `head` bone. The extra child
- * offset seats the FFL head against the authored neck opening.
- */
-export const HEAD_SEAT_Y_OFFSETS = [9, 16.2] as const;
-
 export type AttachedBody = {
   body: BodyModel;
   headRoot: THREE.Object3D;
@@ -97,7 +90,6 @@ export async function attachBodyToCharModel(
   const headPivot = new THREE.Group();
   headPivot.name = "head-pivot";
   headPivot.add(charModel.meshes);
-  charModel.meshes.position.y = HEAD_SEAT_Y_OFFSETS[gender];
   attachHeadToBody(body, headPivot);
 
   return {
