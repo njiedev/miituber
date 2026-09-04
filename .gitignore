@@ -17,9 +17,7 @@ src-tauri/target
 src-tauri/*.key*
 
 # Internal working files — kept locally, never published to the public repo
-CLAUDE.md
-CLAUDE non fable.md
-MYTODO.md
+AGENTS.md
 docs/
 .claude/
 

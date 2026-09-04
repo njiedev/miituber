@@ -1,3 +1,16 @@
+#[cfg(any(windows, test))]
+fn is_trusted_media_origin(uri: &str) -> bool {
+    let Ok(uri) = tauri::Url::parse(uri) else {
+        return false;
+    };
+
+    match (uri.scheme(), uri.host_str(), uri.port()) {
+        ("http" | "https", Some("tauri.localhost"), None) => true,
+        ("http", Some("localhost"), Some(1420)) => true,
+        _ => false,
+    }
+}
+
 /// Answers WebView2 camera/microphone permission requests from the app's own
 /// origin so users never see the browser-style permission prompt. Windows'
 /// global camera/microphone privacy settings still apply.
@@ -29,9 +42,7 @@ fn auto_allow_media_permissions(window: &tauri::WebviewWindow) {
             let mut uri = windows::core::PWSTR::null();
             args.Uri(&mut uri)?;
             let uri = take_pwstr(uri);
-            let own_origin = uri.starts_with("http://tauri.localhost")
-                || uri.starts_with("https://tauri.localhost")
-                || uri.starts_with("http://localhost:1420");
+            let own_origin = is_trusted_media_origin(&uri);
 
             let mut kind = Default::default();
             args.PermissionKind(&mut kind)?;
@@ -77,4 +88,29 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_trusted_media_origin;
+
+    #[test]
+    fn trusts_app_and_development_origins() {
+        assert!(is_trusted_media_origin("http://tauri.localhost/"));
+        assert!(is_trusted_media_origin("https://tauri.localhost/camera"));
+        assert!(is_trusted_media_origin("http://localhost:1420/"));
+    }
+
+    #[test]
+    fn rejects_lookalike_and_untrusted_origins() {
+        assert!(!is_trusted_media_origin(
+            "http://tauri.localhost.attacker.example/"
+        ));
+        assert!(!is_trusted_media_origin(
+            "http://tauri.localhost@attacker.example/"
+        ));
+        assert!(!is_trusted_media_origin("https://localhost:1420/"));
+        assert!(!is_trusted_media_origin("http://localhost:1421/"));
+        assert!(!is_trusted_media_origin("not a URL"));
+    }
 }
