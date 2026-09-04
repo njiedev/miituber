@@ -60,10 +60,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Public macOS signing and notarization are deferred. macOS
-          # transparency support remains available for local testing.
           - platform: "windows-latest"
             args: ""
+          # Ship one unsigned universal download while Apple Developer signing
+          # and notarization remain unavailable.
+          - platform: "macos-latest"
+            args: "--target universal-apple-darwin --bundles app,dmg --no-sign"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +80,10 @@ jobs:
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install universal macOS Rust targets
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2

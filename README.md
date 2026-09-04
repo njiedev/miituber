@@ -3,9 +3,9 @@
 <img width="1280" height="310" alt="New Project (1)" src="https://github.com/user-attachments/assets/047e1588-3a1e-4478-ae4e-c9119f5ce943" />
 
 NOTE(s):
-- Mii Creator(mii.nxw.pw) custom features currently do not work with Miituber. Researching it atm
-- The software does run on mac, but I do not have an Apple Developer Account at the moment. If you want to use it on mac read the **Building from source** part at the bottom.
-- Making contributor docs soon
+- Mii Creator (mii.nxw.pw) custom features do not work with MiiTuber.
+- macOS downloads are unsigned and not notarized because the project does not currently have an Apple Developer account. See the macOS instructions below for the one-time launch step.
+- Contributor documentation is coming soon.
 
 Turn your **Mii** into a VTuber. MiiTuber shows your Mii as a live 3D avatar that copies your head movements from your webcam and moves its mouth when you talk, ready to drop into OBS with a transparent background.
 
@@ -14,7 +14,7 @@ Everything runs on your own PC. No accounts, no uploads, nothing sent anywhere.
 
 ## Download
 
-**[⬇ Download the latest release](https://github.com/njiedev/miituber/releases/latest)** (Windows)
+**[⬇ Download the latest release](https://github.com/njiedev/miituber/releases/latest)** (Windows and macOS)
 
 Download, run it, and follow the one-time setup below.
 
@@ -57,20 +57,11 @@ Then import the file in MiiTuber and it's saved to your library.
 
 > **Don't minimize the window while streaming.** OBS can't capture a minimized window, so your Mii will disappear from your scene. It's fine if the window is hidden behind other windows or moved off to the side. Just keep it open, not minimized.
 
-## MacOS
+## macOS
 
-MacOS users currently must build MiiTuber from source. Install [Node.js](https://nodejs.org) 20+, the [Rust toolchain](https://rustup.rs), and the Xcode command-line tools, then run:
+Download the universal `.dmg` from the latest release, open it, and drag MiiTuber into Applications. The same download supports Apple Silicon and Intel Macs, including transparent-background capture.
 
-```bash
-xcode-select --install
-git clone https://github.com/njiedev/miituber.git
-cd miituber
-npm install
-# Put AFLResHigh_2_3.dat in public/
-npm run tauri build
-```
-
-Note that the **transparent background** feature does not work on MacOS. As a workaround, set MiiTuber's background to solid green, blue, or magenta, capture the MiiTuber window in OBS, and add OBS's **Chroma Key** filter to remove that color.
+The app is currently unsigned and not notarized. On the first launch, Control-click MiiTuber in Applications, choose **Open**, then choose **Open** again. If macOS still blocks it, go to **System Settings → Privacy & Security** and choose **Open Anyway** for MiiTuber.
 
 ## Bugs & feedback
 

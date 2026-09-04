@@ -10,6 +10,6 @@
     "Fixed a bug where selecting a Mii could play a brief dialogue sound with no dialogue visible.",
     "Fixed a bug where starting microphone or camera tracking could play a brief dialogue sound."
   ],
-  "footer": "Thanks for 200 downloads! — 3wb <3\n\nNOTE: Mii Creator's new update brings features that will most likely not be compatible with MiiTuber. Avoid using custom Mii Creator features on Miis while I work on a fix.",
+  "footer": "Thanks for 200 downloads! — 3wb <3\n\nNOTE: Mii Creator custom features do not work with MiiTuber.",
   "imageUrl": "/update-modal-mii.png"
 }

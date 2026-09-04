@@ -8,12 +8,13 @@ import {
 describe("release notes", () => {
   it("finds bundled notes by exact installed version", () => {
     expect(releaseNotesForVersion("0.2.0")?.title).toContain("0.2.0");
+    expect(releaseNotesForVersion("0.2.1")?.title).toContain("0.2.1");
     expect(releaseNotesForVersion("9.9.9")).toBeNull();
   });
 
   it("shows known notes once after an installed-version change", () => {
-    expect(shouldShowReleaseNotes("0.2.0", "0.1.2", null)).toBe(true);
-    expect(shouldShowReleaseNotes("0.2.0", "0.1.2", "0.2.0")).toBe(false);
+    expect(shouldShowReleaseNotes("0.2.1", "0.2.0", null)).toBe(true);
+    expect(shouldShowReleaseNotes("0.2.1", "0.2.0", "0.2.1")).toBe(false);
   });
 
   it("does not show notes on a fresh install or ordinary launch", () => {

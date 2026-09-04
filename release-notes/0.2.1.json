@@ -1,0 +1,13 @@
+{
+  "version": "0.2.1",
+  "title": "What’s New in MiiTuber 0.2.1",
+  "items": [
+    "Added a universal macOS download",
+    "Fixed the OBS Clean View so switching between full-body and head-only display stays in sync with the main window.",
+    "Removed the unused GLB rendering fallback and its networking and hashing dependencies.",
+    "Changed the Mii thumbnails (Credit Arian Kordi) ",
+    "Added .charinfo support (Credit Arian Kordi) "
+  ],
+  "footer": "The macOS build is unsigned and not notarized. On first launch, Control-click MiiTuber, choose Open, and confirm Open. If it is still blocked, allow MiiTuber under System Settings → Privacy & Security.\n\nNOTE: Mii Creator custom features do not work with MiiTuber.",
+  "imageUrl": "/update-modal-mii.png"
+}
