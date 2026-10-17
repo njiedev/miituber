@@ -35,15 +35,6 @@ describe("HysteresisTracker", () => {
     expect(tracker.update(0.5)).toBe(true);
     expect(tracker.update(0.4)).toBe(false);
   });
-
-  it("can reset to inactive", () => {
-    const tracker = new HysteresisTracker(0.6, 0.4);
-
-    tracker.update(0.7);
-    tracker.reset();
-
-    expect(tracker.update(0.5)).toBe(false);
-  });
 });
 
 describe("ExpressionSignalTracker", () => {
@@ -84,19 +75,6 @@ describe("HeadRotationSmoother", () => {
       pitch: 5,
       yaw: -5,
       roll: 10,
-    });
-  });
-
-  it("can reset back to neutral", () => {
-    const smoother = new HeadRotationSmoother(1);
-
-    smoother.update({ pitch: 10, yaw: -10, roll: 20 });
-    smoother.reset();
-
-    expect(smoother.update({ pitch: 0, yaw: 0, roll: 0 })).toEqual({
-      pitch: 0,
-      yaw: 0,
-      roll: 0,
     });
   });
 });

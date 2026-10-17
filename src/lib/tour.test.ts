@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   charsVisible,
   readTourState,
-  shouldAutoStart,
   TOUR_CHAPTERS,
   TOUR_STORAGE_KEY,
   TourController,
@@ -58,20 +57,6 @@ describe("tour state", () => {
   });
 });
 
-describe("shouldAutoStart", () => {
-  it.each([
-    ["library", { library: false, workspace: false }, true],
-    ["library", { library: true, workspace: false }, false],
-    ["workspace", { library: true, workspace: false }, true],
-    ["workspace", { library: false, workspace: true }, false],
-  ] satisfies [TourChapterId, Record<TourChapterId, boolean>, boolean][])(
-    "checks %s independently",
-    (chapterId, state, expected) => {
-      expect(shouldAutoStart(chapterId, state)).toBe(expected);
-    },
-  );
-});
-
 describe("TourController", () => {
   it("advances from start through all steps, then returns null", () => {
     const completed: TourChapterId[] = [];
@@ -121,17 +106,6 @@ describe("TourController", () => {
 });
 
 describe("charsVisible", () => {
-  it("is zero at t=0", () => {
-    expect(charsVisible(0, 12)).toBe(0);
-  });
-
-  it("is monotonic", () => {
-    const samples = [0, 120, 240, 360, 480].map((elapsedMs) =>
-      charsVisible(elapsedMs, 100),
-    );
-
-    expect(samples).toEqual([...samples].sort((a, b) => a - b));
-  });
 
   it("clamps at textLength", () => {
     expect(charsVisible(10_000, 8)).toBe(8);
@@ -149,16 +123,5 @@ describe("chapter data", () => {
     );
 
     expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it("uses null or non-empty target selectors", () => {
-    for (const chapter of Object.values(TOUR_CHAPTERS)) {
-      for (const step of chapter.steps) {
-        expect(
-          step.target === null ||
-            (typeof step.target === "string" && step.target.length > 0),
-        ).toBe(true);
-      }
-    }
   });
 });

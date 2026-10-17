@@ -1,3 +1,4 @@
+import { SustainedSignalGate } from "./autoBlink";
 import { mapToExpression } from "./expressionMapper";
 import {
   BlendshapeSmoother,
@@ -50,6 +51,9 @@ export class ExpressionPipeline {
   private blendshapeSmoother: BlendshapeSmoother;
   private headRotationSmoother = new HeadRotationSmoother(0.35);
   private microphoneMouthTracker: HysteresisTracker;
+  private blinkLeftGate = new SustainedSignalGate();
+  private blinkRightGate = new SustainedSignalGate();
+  private suppressBriefBlinks = false;
 
   constructor(private profile: TuningProfile) {
     this.signalTracker = new ExpressionSignalTracker(profile);
@@ -75,6 +79,10 @@ export class ExpressionPipeline {
       profile.lipSync.activation.exit,
     );
     this.microphoneMouthTracker.reset();
+  }
+
+  setSuppressBriefBlinks(enabled: boolean) {
+    this.suppressBriefBlinks = enabled;
   }
 
   processFrame(
@@ -103,6 +111,12 @@ export class ExpressionPipeline {
       externalMouthOpenScore * this.profile.lipSync.activation.gain,
     );
     const signals = this.signalTracker.update(rawMapped.scores);
+    const sustainedBlinkLeft = this.blinkLeftGate.update(signals.blinkLeft, nowMs);
+    const sustainedBlinkRight = this.blinkRightGate.update(signals.blinkRight, nowMs);
+    if (this.suppressBriefBlinks) {
+      signals.blinkLeft = sustainedBlinkLeft;
+      signals.blinkRight = sustainedBlinkRight;
+    }
     const cameraMouthOpenSignal = signals.mouthOpen;
     const microphoneMouthOpenSignal = this.microphoneMouthTracker.update(
       microphoneMouthOpenScore,
@@ -150,6 +164,8 @@ export class ExpressionPipeline {
   reset() {
     this.signalTracker.reset();
     this.microphoneMouthTracker.reset();
+    this.blinkLeftGate.reset();
+    this.blinkRightGate.reset();
     this.blendshapeSmoother.reset();
     this.headRotationSmoother.reset();
   }

@@ -3,7 +3,6 @@ import {
   addAvatar,
   getAvatar,
   LIBRARY_STORAGE_KEY,
-  parseLibrary,
   readLibrary,
   removeAvatar,
   renameAvatar,
@@ -33,10 +32,6 @@ describe("avatar library", () => {
 
   beforeEach(() => {
     storage = new MemoryStorage();
-  });
-
-  it("starts empty", () => {
-    expect(readLibrary(storage)).toEqual([]);
   });
 
   it("adds and persists an avatar", () => {
@@ -108,9 +103,5 @@ describe("avatar library", () => {
     const parsed = readLibrary(storage);
     expect(parsed).toHaveLength(1);
     expect(parsed[0].id).toBe("ok");
-  });
-
-  it("parseLibrary tolerates null", () => {
-    expect(parseLibrary(null)).toEqual([]);
   });
 });

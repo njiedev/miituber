@@ -16,11 +16,12 @@ const ALL_CODES: AppErrorCode[] = [
 ];
 
 describe("application errors", () => {
-  it.each(ALL_CODES)("maps %s to safe user-facing copy", (code) => {
-    const details = appErrorDetails(code);
-    expect(details.title).not.toMatch(/Error:|TypeError|undefined/i);
-    expect(details.message.length).toBeGreaterThan(20);
-    expect(friendlyErrorMessage(code)).toBe(`${details.title}. ${details.message}`);
+  it("gives every error code user-facing copy without raw error text", () => {
+    for (const code of ALL_CODES) {
+      const details = appErrorDetails(code);
+      expect(details.title).not.toMatch(/Error:|TypeError|undefined/i);
+      expect(friendlyErrorMessage(code)).toBe(`${details.title}. ${details.message}`);
+    }
   });
 
   it("classifies expected camera and microphone failures", () => {

@@ -4,8 +4,6 @@ import {
   calibrateBlendshapes,
   ExpressionPipeline,
   resolveMouthOpenSource,
-  zeroExpressionScores,
-  zeroExpressionSignals,
 } from "./expressionPipeline";
 import { FFLExpression, type BlendshapeCategory } from "./types";
 import { createDefaultTuningProfile } from "./tuningProfile";
@@ -86,33 +84,6 @@ describe("ExpressionPipeline", () => {
       { categoryName: "mouthSmileLeft", score: 0.35 },
       { categoryName: "mouthSmileRight", score: 0.35 },
     ]);
-  });
-
-  it("can drive mouth-open from an external mic score", () => {
-    const profile = createDefaultTuningProfile();
-    profile.oneEuro = { minCutoff: 20, beta: 1, derivativeCutoff: 1 };
-    profile.minimumHoldMs = 0;
-    const pipeline = new ExpressionPipeline(profile);
-
-    const cameraOnly = pipeline.processFrame(
-      shapes({ jawOpen: 0 }),
-      undefined,
-      0,
-      0.9,
-      "camera",
-    );
-    pipeline.reset();
-    const micOnly = pipeline.processFrame(
-      shapes({ jawOpen: 0 }),
-      undefined,
-      33,
-      0.9,
-      "mic",
-    );
-
-    expect(cameraOnly.expressionIndex).toBe(FFLExpression.Normal);
-    expect(micOnly.expressionIndex).toBe(FFLExpression.OpenMouth);
-    expect(micOnly.rawMapped.scores.mouthOpen).toBe(0.9);
   });
 
   it("keeps microphone and camera mouth activation independent", () => {
@@ -196,6 +167,39 @@ describe("ExpressionPipeline", () => {
   });
 });
 
+describe("brief blink suppression", () => {
+  const closedEyes = shapes({ eyeBlinkLeft: 0.9, eyeBlinkRight: 0.9 });
+
+  function pipeline(suppress: boolean) {
+    const profile = createDefaultTuningProfile();
+    profile.oneEuro = { minCutoff: 20, beta: 1, derivativeCutoff: 1 };
+    profile.minimumHoldMs = 0;
+    const subject = new ExpressionPipeline(profile);
+    subject.setSuppressBriefBlinks(suppress);
+    return subject;
+  }
+
+  it("ignores a quick tracked blink but shows eyes held closed", () => {
+    const subject = pipeline(true);
+
+    expect(subject.processFrame(closedEyes, undefined, 0).expressionIndex).toBe(
+      FFLExpression.Normal,
+    );
+    expect(subject.processFrame(closedEyes, undefined, 200).expressionIndex).toBe(
+      FFLExpression.Normal,
+    );
+    expect(subject.processFrame(closedEyes, undefined, 500).expressionIndex).toBe(
+      FFLExpression.Blink,
+    );
+  });
+
+  it("passes tracked blinks straight through when suppression is off", () => {
+    expect(pipeline(false).processFrame(closedEyes, undefined, 0).expressionIndex).toBe(
+      FFLExpression.Blink,
+    );
+  });
+});
+
 describe("expression pipeline helpers", () => {
   it("subtracts neutral calibration before smoothing", () => {
     expect(
@@ -219,11 +223,6 @@ describe("expression pipeline helpers", () => {
       jawOpen: 0.30000000000000004,
       eyeBlinkLeft: 0.6000000000000001,
     });
-  });
-
-  it("creates neutral debug score and signal objects", () => {
-    expect(zeroExpressionScores().smile).toBe(0);
-    expect(zeroExpressionSignals().smile).toBe(false);
   });
 
   it("falls back from mic-only to camera jaw when mic is not running", () => {

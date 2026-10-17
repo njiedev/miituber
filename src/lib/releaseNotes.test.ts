@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import packageJson from "../../package.json";
 import {
   hasLegacyInstallData,
   releaseNotesForVersion,
@@ -6,9 +7,10 @@ import {
 } from "./releaseNotes";
 
 describe("release notes", () => {
-  it("finds bundled notes by exact installed version", () => {
-    expect(releaseNotesForVersion("0.2.0")?.title).toContain("0.2.0");
-    expect(releaseNotesForVersion("0.2.1")?.title).toContain("0.2.1");
+  it("ships notes for the current app version", () => {
+    expect(releaseNotesForVersion(packageJson.version)?.version).toBe(
+      packageJson.version,
+    );
     expect(releaseNotesForVersion("9.9.9")).toBeNull();
   });
 

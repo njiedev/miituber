@@ -19,6 +19,7 @@ import {
 } from "./lib/expressionPipeline";
 import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
 import { AvatarPoseCoordinator } from "./lib/avatarPoseCoordinator";
+import { AutoBlinker, withBlink } from "./lib/autoBlink";
 import { LipSyncEnvelope, rootMeanSquare } from "./lib/lipSync";
 import { AvatarScene } from "./lib/scene";
 import { ensureReady, type FFLContext } from "./lib/fflRenderer";
@@ -283,6 +284,8 @@ const CLEAN_OUTPUT_WINDOW_LABEL = "clean-output";
 const CLEAN_OUTPUT_VIEW = "clean-output";
 const CLEAN_OUTPUT_AVATAR_STORAGE_KEY = "miituber.cleanOutputAvatar.v1";
 const BODY_VISIBLE_STORAGE_KEY = "miituber.bodyVisible.v1";
+const AUTO_BLINK_STORAGE_KEY = "miituber.autoBlink.v1";
+const AUTO_BLINK_TICK_MS = 30;
 const SHOW_DEBUG_INFO_STORAGE_KEY = "miituber.showDebugInfo.v1";
 const LAST_SEEN_RELEASE_NOTES_KEY = "miituber.lastSeenReleaseNotesVersion.v1";
 const LAST_LAUNCHED_VERSION_KEY = "miituber.lastLaunchedVersion.v1";
@@ -338,6 +341,7 @@ const emptyPreviewEl = document.querySelector<HTMLElement>(".empty-preview");
 const previewFrameEl = document.querySelector<HTMLElement>(".preview-frame");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
 const bodyVisibleInput = document.querySelector<HTMLInputElement>("#body-visible");
+const autoBlinkInput = document.querySelector<HTMLInputElement>("#auto-blink");
 const transparentBackgroundInput = document.querySelector<HTMLInputElement>(
   "#transparent-background",
 );
@@ -496,6 +500,9 @@ let latestCleanOutputPose: CleanOutputPosePayload = {
   expressionIndex: FFLExpression.Normal,
   headRotation: { pitch: 0, yaw: 0, roll: 0 },
 };
+let baseExpressionIndex: number = FFLExpression.Normal;
+const autoBlinker = new AutoBlinker();
+let autoBlinkClosed = false;
 // When the tracker loses the face, hold the last pose briefly (so blinks of
 // detection don't move the avatar), then ease the head back to neutral.
 // NOTE: must be declared before the module-level init call below runs
@@ -1137,9 +1144,9 @@ function initializeUpdateDevControls() {
     if (state === "available") showTestAvailableUpdate();
     if (state === "downloading") showDownloadingUpdate(35);
     if (state === "installing") showInstallingUpdate();
-    if (state === "ready") showReadyToRestart("0.2.1");
+    if (state === "ready") showReadyToRestart("0.2.2");
     if (state === "error") showUpdateError(null, "Test error: nothing was changed.");
-    if (state === "whats-new") showWhatsNewIfNeeded("0.2.1", "0.2.0");
+    if (state === "whats-new") showWhatsNewIfNeeded("0.2.2", "0.2.1");
     if (state === "clear-seen") {
       localStorage.removeItem(LAST_SEEN_RELEASE_NOTES_KEY);
       button.textContent = "Cleared!";
@@ -1150,7 +1157,7 @@ function initializeUpdateDevControls() {
 
 function showTestAvailableUpdate() {
   resetUpdateModal();
-  setUpdateModalCopy("A New Update is Available!", "MiiTuber 0.2.1 is ready. Would you like to install it?");
+  setUpdateModalCopy("A New Update is Available!", "MiiTuber 0.2.2 is ready. Would you like to install it?");
   setUpdateModalButtons("Update Now", () => showDownloadingUpdate(0), "Update Later", hideUpdateModal);
   showUpdateModal();
 }
@@ -1161,6 +1168,7 @@ async function initializeMainWindow() {
   populateTuningControls();
   updateAvatarBackground();
   initializeBodyVisibleToggle();
+  initializeAutoBlink();
   initializeDebugInfoToggle();
   resetAvatarTrackingState();
   setTrackingButtons();
@@ -1381,8 +1389,12 @@ function applyCleanOutputPose(pose: CleanOutputPosePayload) {
 }
 
 function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
-  latestCleanOutputPose = { expressionIndex, headRotation };
-  avatarScene.setExpression(expressionIndex);
+  baseExpressionIndex = expressionIndex;
+  const displayedExpressionIndex = autoBlinkClosed
+    ? withBlink(expressionIndex)
+    : expressionIndex;
+  latestCleanOutputPose = { expressionIndex: displayedExpressionIndex, headRotation };
+  avatarScene.setExpression(displayedExpressionIndex);
   avatarScene.setHeadRotation(headRotation);
   publishCleanOutputPose();
 }
@@ -1548,6 +1560,14 @@ expressionSelect?.addEventListener("change", () => {
       override: resolvedExpressionIndex,
     });
   }
+});
+
+autoBlinkInput?.addEventListener("change", () => {
+  const enabled = autoBlinkInput.checked;
+  writeAutoBlinkPreference(enabled);
+  expressionPipeline.setSuppressBriefBlinks(enabled);
+  tickAutoBlink();
+  logRenderEvent("auto blink toggled", { enabled });
 });
 
 bodyVisibleInput?.addEventListener("change", () => {
@@ -2045,14 +2065,14 @@ function easeHeadTowardNeutral(now: number) {
     return;
   }
 
-  const { expressionIndex, headRotation } = latestCleanOutputPose;
+  const { headRotation } = latestCleanOutputPose;
   const { pitch, yaw, roll } = headRotation;
   if (Math.max(Math.abs(pitch), Math.abs(yaw), Math.abs(roll)) < 0.1) return;
 
   const dt = now - faceLostLastFrameAt;
   faceLostLastFrameAt = now;
   const keep = Math.exp(-dt / FACE_LOST_EASE_TAU_MS);
-  applyExpressionPose(expressionIndex, {
+  applyExpressionPose(baseExpressionIndex, {
     pitch: pitch * keep,
     yaw: yaw * keep,
     roll: roll * keep,
@@ -2634,6 +2654,47 @@ function initializeBodyVisibleToggle() {
   const visible = readBodyVisiblePreference();
   if (bodyVisibleInput) bodyVisibleInput.checked = visible;
   avatarScene.setBodyVisible(visible);
+}
+
+function readAutoBlinkPreference() {
+  try {
+    const raw = localStorage.getItem(AUTO_BLINK_STORAGE_KEY);
+    if (raw === null) return true;
+
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === "boolean" ? parsed : true;
+  } catch (error) {
+    console.warn("[MiiTuber] could not read auto blink preference", { error });
+    return true;
+  }
+}
+
+function writeAutoBlinkPreference(enabled: boolean) {
+  try {
+    localStorage.setItem(AUTO_BLINK_STORAGE_KEY, JSON.stringify(enabled));
+  } catch (error) {
+    console.warn("[MiiTuber] could not save auto blink preference", {
+      error,
+      enabled,
+    });
+  }
+}
+
+function initializeAutoBlink() {
+  const enabled = readAutoBlinkPreference();
+  if (autoBlinkInput) autoBlinkInput.checked = enabled;
+  expressionPipeline.setSuppressBriefBlinks(enabled);
+  window.setInterval(tickAutoBlink, AUTO_BLINK_TICK_MS);
+}
+
+function tickAutoBlink() {
+  const active = !!autoBlinkInput?.checked;
+  if (!active) autoBlinker.reset();
+  const closed = active && autoBlinker.update(performance.now());
+  if (closed === autoBlinkClosed) return;
+
+  autoBlinkClosed = closed;
+  setAvatarPose(baseExpressionIndex, latestCleanOutputPose.headRotation);
 }
 
 function initializeDebugInfoToggle() {

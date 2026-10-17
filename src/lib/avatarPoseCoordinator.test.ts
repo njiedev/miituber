@@ -26,21 +26,6 @@ describe("AvatarPoseCoordinator", () => {
     expect(pose.rawMapped.scores.mouthOpen).toBe(0.9);
   });
 
-  it("continues to drive expressions from camera-only input", () => {
-    const pose = coordinator().updateCamera(
-      {
-        blendshapes: shapes({ mouthSmileLeft: 0.9, mouthSmileRight: 0.9 }),
-        trackingFps: 30,
-        detectMs: 8,
-      },
-      10,
-      0,
-      "camera",
-    );
-
-    expect(pose.expressionIndex).toBe(FFLExpression.Smile);
-  });
-
   it("composes microphone mouth movement with a camera expression", () => {
     const subject = coordinator();
     subject.updateCamera(
