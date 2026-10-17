@@ -1,0 +1,11 @@
+{
+  "version": "0.2.2",
+  "title": "What’s New in MiiTuber 0.2.2",
+  "items": [
+    "Added Auto blink, next to Show body in the top bar. Your avatar blinks on its own every few seconds, even when the camera is off.",
+    "While Auto blink is on, quick blinks from the camera are ignored so your avatar doesn't double-blink. Closing your eyes for about half a second still shows on your avatar.",
+    "Turn Auto blink off to go back to camera-only blinking. MiiTuber remembers your choice."
+  ],
+  "footer": "The macOS build is unsigned and not notarized. On first launch, Control-click MiiTuber, choose Open, and confirm Open. If it is still blocked, allow MiiTuber under System Settings → Privacy & Security.\n\nNOTE: Mii Creator custom features do not work with MiiTuber.",
+  "imageUrl": "/update-modal-mii.png"
+}
