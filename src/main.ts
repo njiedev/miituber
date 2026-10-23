@@ -212,10 +212,8 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   ) as ArrayBuffer;
 }
 import {
-  FFL_EXPRESSION_LABELS,
   FFLExpression,
   type BlendshapeCategory,
-  type ExpressionChannels,
   type ExpressionScores,
   type ExpressionSignals,
   type HeadRotation,
@@ -257,6 +255,13 @@ import {
   SHOW_DEBUG_INFO_STORAGE_KEY,
   writeBooleanPreference,
 } from "./lib/preferences";
+import {
+  expressionLabel,
+  formatChannels,
+  formatExpressionScores,
+  formatScore,
+  formatTopBlendshapes,
+} from "./lib/debugFormat";
 import { clamp01, clampNumber } from "./lib/math";
 import { openPopover } from "./lib/popover";
 import { createUpdateExperience } from "./lib/updateExperience";
@@ -592,38 +597,8 @@ function setLipSyncDebugValue(score: number) {
   if (debugLipSyncMouthEl) debugLipSyncMouthEl.textContent = score.toFixed(2);
 }
 
-function formatExpressionScores(scores: {
-  smile: number;
-  mouthOpen: number;
-  blinkLeft: number;
-  blinkRight: number;
-  anger: number;
-  sorrow: number;
-  surprise: number;
-}) {
-  return [
-    `smile ${formatScore(scores.smile)}`,
-    `mouth ${formatScore(scores.mouthOpen)}`,
-    `blink ${formatScore(Math.max(scores.blinkLeft, scores.blinkRight))}`,
-    `anger ${formatScore(scores.anger)}`,
-    `sad ${formatScore(scores.sorrow)}`,
-    `surprise ${formatScore(scores.surprise)}`,
-  ].join(", ");
-}
 
-function formatTopBlendshapes(blendshapes: BlendshapeCategory[]) {
-  const active = blendshapes
-    .filter(({ score }) => score >= 0.05)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 5)
-    .map(({ categoryName, score }) => `${categoryName} ${formatScore(score)}`);
 
-  return active.length > 0 ? active.join(", ") : "none";
-}
-
-function formatScore(score: number) {
-  return score.toFixed(2);
-}
 
 function renderBlendshapeBars(
   rawBlendshapes: BlendshapeCategory[],
@@ -676,14 +651,7 @@ function renderBlendshapeBars(
   debugBlendshapeBarsEl.replaceChildren(fragment);
 }
 
-function expressionLabel(expressionIndex: number) {
-  const label = FFL_EXPRESSION_LABELS[expressionIndex as FFLExpression];
-  return label ? `${expressionIndex} ${label}` : String(expressionIndex);
-}
 
-function formatChannels(channels: ExpressionChannels) {
-  return `eyes ${channels.eyes}, mouth ${channels.mouth}, emotion ${channels.emotion}`;
-}
 
 
 if (!viewerCanvas) {
