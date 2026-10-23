@@ -100,14 +100,14 @@ export const TOUR_CHAPTERS: Record<TourChapterId, TourChapter> = {
         id: "ws-output",
         target: "#isolate-capture-button",
         emotion: "normal",
-        text: "When you're ready to stream, Clean View gives OBS a clean window — add it with Window Capture and the background stays truly transparent.",
+        text: "This button hides the controls and makes the MiiTuber window transparent. In OBS, add MiiTuber with Window Capture. Press Escape to restore the controls.",
         highlight: "Window Capture",
       },
       {
         id: "ws-no-minimize",
         target: "#isolate-capture-button",
         emotion: "surprised",
-        text: "One heads-up: don't minimize the Clean View window while streaming. OBS can't capture a minimized window, so your Mii will vanish. Keep it open (even hidden behind other windows) and you're set.",
+        text: "While streaming, don't minimize the MiiTuber window. OBS cannot capture a minimized window. Keep it open, even behind other windows.",
         highlight: "don't minimize",
       },
       {

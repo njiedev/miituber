@@ -14,7 +14,6 @@
  *                0x28, unpacked one-byte fields; NOT FFLStoreData-prefixed).
  *                No public spec or encoder exists, so these are rejected with
  *                a friendly error instead of FFL's CRC failure.
- *                See docs/research/mii-formats.md.
  */
 
 /** Sizes FFL.js parses without help. */

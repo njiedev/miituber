@@ -52,7 +52,7 @@ Then import the file in MiiTuber and it's saved to your library.
 
 ## Adding your Mii to OBS
 
-1. In MiiTuber, turn on **transparent background**. The whole MiiTuber window becomes see-through except your Mii.
+1. In MiiTuber, select the **checkerboard capture button** in the top bar. This hides the controls and makes the window transparent. Press **Escape** to restore the controls.
 2. In OBS, add a **Window Capture** source and select the MiiTuber window.
 3. Your Mii now floats over your scene. No green screen needed.
 

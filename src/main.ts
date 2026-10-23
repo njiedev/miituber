@@ -1,7 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
-import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import {
@@ -21,7 +19,7 @@ import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
 import { AvatarPoseCoordinator } from "./lib/avatarPoseCoordinator";
 import { AutoBlinker, withBlink } from "./lib/autoBlink";
 import { LipSyncEnvelope, rootMeanSquare } from "./lib/lipSync";
-import { AvatarScene } from "./lib/scene";
+import { AvatarScene, type AvatarBackground } from "./lib/scene";
 import { ensureReady, type FFLContext } from "./lib/fflRenderer";
 import { normalizeMiiBytes } from "./lib/miiData";
 import { renderMiiThumbnailDataUrl } from "./lib/miiThumbnail";
@@ -37,9 +35,6 @@ import {
   shouldShowReleaseNotes,
 } from "./lib/releaseNotes";
 
-// Bundled assets served from Vite's public/ dir.
-// NOTE: shipping should load a user-supplied .dat from disk instead of bundling
-// it (see docs/research/roadmap.md Phase 2 — do not redistribute Nintendo data).
 const FFL_RESOURCE_FILE_NAME = "AFLResHigh_2_3.dat";
 const FFL_RESOURCE_URL = "/AFLResHigh_2_3.dat";
 const FFL_WASM_URL = "/ffl-emscripten.wasm";
@@ -61,13 +56,7 @@ async function getFflContext(): Promise<FFLContext> {
   return fflContextPromise;
 }
 
-// Warm the FFL renderer at launch so the first-run "choose AFLResHigh_2_3.dat"
-// prompt lands on the reachable main-window toast. Deferring until the first
-// render (importing a Mii) makes the prompt fire while the import modal's
-// scrim (z-index 100) is covering the toast (z-index 30), so the user can
-// never see or click it — the app just looks stuck on "Rendering a preview...".
-// Prompting up front also matches the documented first-run behaviour and
-// warms the WASM before the user needs it.
+// Load the resource before import so the setup gate appears at startup.
 async function prewarmFflRenderer(): Promise<void> {
   try {
     await getFflContext();
@@ -280,9 +269,6 @@ import {
   type MiiErrorLine,
 } from "./lib/errorSpeaker";
 
-const CLEAN_OUTPUT_WINDOW_LABEL = "clean-output";
-const CLEAN_OUTPUT_VIEW = "clean-output";
-const CLEAN_OUTPUT_AVATAR_STORAGE_KEY = "miituber.cleanOutputAvatar.v1";
 const BODY_VISIBLE_STORAGE_KEY = "miituber.bodyVisible.v1";
 const AUTO_BLINK_STORAGE_KEY = "miituber.autoBlink.v1";
 const AUTO_BLINK_TICK_MS = 30;
@@ -295,19 +281,11 @@ const TUNING_SAVE_DEBOUNCE_MS = 400;
 const LEGACY_INSTALL_STORAGE_KEYS = [
   LIBRARY_STORAGE_KEY,
   TOUR_STORAGE_KEY,
-  CLEAN_OUTPUT_AVATAR_STORAGE_KEY,
   BODY_VISIBLE_STORAGE_KEY,
   SHOW_DEBUG_INFO_STORAGE_KEY,
 ] as const;
-const CLEAN_OUTPUT_AVATAR_EVENT = "clean-output-avatar";
-const CLEAN_OUTPUT_BACKGROUND_EVENT = "clean-output-background";
-const CLEAN_OUTPUT_BODY_VISIBILITY_EVENT = "clean-output-body-visibility";
-const CLEAN_OUTPUT_POSE_EVENT = "clean-output-pose";
-const CLEAN_OUTPUT_READY_EVENT = "clean-output-ready";
-const CLEAN_OUTPUT_HIDDEN_EVENT = "clean-output-hidden";
 
 const searchParams = new URLSearchParams(window.location.search);
-const isCleanOutputWindow = searchParams.get("view") === CLEAN_OUTPUT_VIEW;
 
 const fileInput = document.querySelector<HTMLInputElement>("#mii-file");
 const statusEl = document.querySelector<HTMLElement>("#status");
@@ -413,10 +391,6 @@ const minimumHoldMsInput =
 const micMouthTuningControlEl = document.querySelector<HTMLElement>(
   "#mic-mouth-tuning-control",
 );
-const toggleCleanOutputButton = document.querySelector<HTMLButtonElement>(
-  "#toggle-clean-output-button",
-);
-const outputStatusEl = document.querySelector<HTMLElement>("#output-status");
 const microphoneSelect =
   document.querySelector<HTMLSelectElement>("#microphone-select");
 const mouthSourceSelect =
@@ -491,12 +465,8 @@ let latestCameraMouthScore = 0;
 let latestCameraMouthSignal = false;
 let latestMicrophoneMouthScore = 0;
 let latestMicrophoneMouthSignal = false;
-let cleanOutputMode = false;
 let isolateMode = false;
-let currentCleanOutputAvatar: CleanOutputStoredAvatar | null = null;
-let cleanOutputBackgroundOverride: CleanOutputBackgroundPayload | null = null;
-let cleanOutputAvatarLoaded = false;
-let latestCleanOutputPose: CleanOutputPosePayload = {
+let currentAvatarPose: AvatarPose = {
   expressionIndex: FFLExpression.Normal,
   headRotation: { pitch: 0, yaw: 0, roll: 0 },
 };
@@ -540,25 +510,9 @@ type LipSyncCalibrationSession = {
   rmsSamples: number[];
 };
 
-type CleanOutputStoredAvatar = {
-  name: string;
-  bytes: number[];
-};
-
-type CleanOutputBackgroundPayload = {
-  color: string;
-  transparent: boolean;
-};
-
-type CleanOutputPosePayload = {
+type AvatarPose = {
   expressionIndex: number;
   headRotation: HeadRotation;
-};
-
-type CleanOutputAvatarPayload = CleanOutputStoredAvatar & {
-  background: CleanOutputBackgroundPayload;
-  bodyVisible: boolean;
-  pose: CleanOutputPosePayload;
 };
 
 function setStatus(message: string, tone: "idle" | "error" | "success" = "idle") {
@@ -586,16 +540,6 @@ function setCalibrationStatus(
 
   calibrationStatusEl.textContent = message;
   calibrationStatusEl.dataset.tone = tone;
-}
-
-function setOutputStatus(
-  message: string,
-  tone: "idle" | "error" | "success" = "idle",
-) {
-  if (!outputStatusEl) return;
-
-  outputStatusEl.textContent = message;
-  outputStatusEl.dataset.tone = tone;
 }
 
 function setLipSyncStatus(
@@ -639,15 +583,6 @@ function setTrackingButtons() {
 function getTrackingFps() {
   const fps = Number(trackingFpsSelect?.value ?? "60");
   return Number.isFinite(fps) && fps > 0 ? fps : 60;
-}
-
-function setOutputButtons() {
-  if (toggleCleanOutputButton) {
-    toggleCleanOutputButton.disabled = !avatarLoaded;
-    toggleCleanOutputButton.textContent = cleanOutputMode
-      ? "Close OBS Clean View"
-      : "Open OBS Clean View";
-  }
 }
 
 function setLipSyncButtons(running = lipSyncContext !== null) {
@@ -809,11 +744,7 @@ const expressionPipeline = new ExpressionPipeline(tuningProfile);
 const avatarPoseCoordinator = new AvatarPoseCoordinator(expressionPipeline);
 
 window.addEventListener("resize", () => avatarScene.resize());
-if (isCleanOutputWindow) {
-  void initializeCleanOutputWindow();
-} else {
-  void initializeMainWindow();
-}
+void initializeMainWindow();
 
 async function initializeUpdateExperience() {
   wireUpdateModalControls();
@@ -1172,7 +1103,6 @@ async function initializeMainWindow() {
   initializeDebugInfoToggle();
   resetAvatarTrackingState();
   setTrackingButtons();
-  setOutputButtons();
   setLipSyncButtons();
   setLipSyncDebugValue(0);
   setAppMode("library");
@@ -1192,200 +1122,6 @@ async function initializeMainWindow() {
     rendererPrewarmFinished = true;
     startTourIfNeeded("library");
   });
-  if (isRunningInTauri()) {
-    void listen(CLEAN_OUTPUT_READY_EVENT, () => {
-      void publishCleanOutputAvatarSnapshot();
-    });
-    void listen(CLEAN_OUTPUT_HIDDEN_EVENT, () => {
-      cleanOutputMode = false;
-      setOutputButtons();
-      setOutputStatus("OBS Clean View closed.", "idle");
-    });
-    void WebviewWindow.getCurrent().onCloseRequested(async () => {
-      const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
-      await cleanWindow?.destroy();
-    });
-  }
-}
-
-async function initializeCleanOutputWindow() {
-  cleanOutputMode = true;
-  setAppMode("workspace");
-  document.documentElement.classList.add("clean-output-mode", "clean-output-window");
-  document.body.classList.add("clean-output-mode", "clean-output-window");
-  if (emptyPreviewEl) emptyPreviewEl.hidden = true;
-
-  await WebviewWindow.getCurrent().onCloseRequested((event) => {
-    event.preventDefault();
-    void hideCurrentCleanOutputWindow();
-  });
-
-  await listen<CleanOutputAvatarPayload>(CLEAN_OUTPUT_AVATAR_EVENT, (event) => {
-    void loadCleanOutputAvatar(event.payload);
-  });
-  await listen<CleanOutputBackgroundPayload>(
-    CLEAN_OUTPUT_BACKGROUND_EVENT,
-    (event) => {
-      applyCleanOutputBackground(event.payload);
-    },
-  );
-  await listen<boolean>(CLEAN_OUTPUT_BODY_VISIBILITY_EVENT, (event) => {
-    avatarScene.setBodyVisible(event.payload);
-  });
-  await listen<CleanOutputPosePayload>(CLEAN_OUTPUT_POSE_EVENT, (event) => {
-    applyCleanOutputPose(event.payload);
-  });
-
-  applyCleanOutputBackground({ color: "#e8f0f7", transparent: true });
-  setStatus("Waiting for the main window to send an avatar...", "idle");
-  await emit(CLEAN_OUTPUT_READY_EVENT);
-  window.setTimeout(() => {
-    if (cleanOutputAvatarLoaded) return;
-
-    const storedAvatar = readCleanOutputAvatar();
-    if (!storedAvatar) return;
-
-    void loadCleanOutputAvatar({
-      ...storedAvatar,
-      background: { color: "#e8f0f7", transparent: true },
-      bodyVisible: readBodyVisiblePreference(),
-      pose: latestCleanOutputPose,
-    });
-  }, 300);
-}
-
-async function openCleanOutputWindow() {
-  if (!avatarLoaded) {
-    setOutputStatus("Render an avatar before opening OBS Clean View.", "error");
-    return;
-  }
-
-  try {
-    const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
-    if (!cleanWindow) {
-      throw new Error(
-        "The configured clean-output window was not found. Restart the Tauri app so the window from tauri.conf.json is created.",
-      );
-    }
-
-    cleanOutputMode = true;
-    setOutputButtons();
-    await cleanWindow.show();
-    await cleanWindow.setFocus();
-    await publishCleanOutputAvatarSnapshot();
-    setOutputStatus(
-      "OBS Clean View is open in its own renderer window.",
-      "success",
-    );
-  } catch (error) {
-    cleanOutputMode = false;
-    setOutputButtons();
-    setOutputStatus(userFacingError("CLEAN_VIEW_FAILED", error, { action: "open" }), "error");
-  }
-}
-
-async function closeCleanOutputWindow() {
-  try {
-    const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
-    await cleanWindow?.hide();
-  } catch (error) {
-    setOutputStatus(userFacingError("CLEAN_VIEW_FAILED", error, { action: "close" }), "error");
-    return;
-  }
-
-  cleanOutputMode = false;
-  setOutputButtons();
-  setOutputStatus("OBS Clean View closed.", "idle");
-}
-
-async function hideCurrentCleanOutputWindow() {
-  try {
-    await WebviewWindow.getCurrent().hide();
-    await emit(CLEAN_OUTPUT_HIDDEN_EVENT);
-  } catch (error) {
-    reportAppError("CLEAN_VIEW_FAILED", error, { action: "hide" });
-  }
-}
-
-async function publishCleanOutputAvatarSnapshot() {
-  if (isCleanOutputWindow) return;
-  if (!cleanOutputMode) return;
-
-  const avatar = currentCleanOutputAvatar ?? readCleanOutputAvatar();
-  if (!avatar) return;
-
-  await emitTo<CleanOutputAvatarPayload>(
-    CLEAN_OUTPUT_WINDOW_LABEL,
-    CLEAN_OUTPUT_AVATAR_EVENT,
-    {
-      ...avatar,
-      background: readCurrentBackground(),
-      bodyVisible: readBodyVisiblePreference(),
-      pose: latestCleanOutputPose,
-    },
-  );
-}
-
-function publishCleanOutputBackground() {
-  if (isCleanOutputWindow) return;
-  if (!cleanOutputMode) return;
-
-  void emitTo<CleanOutputBackgroundPayload>(
-    CLEAN_OUTPUT_WINDOW_LABEL,
-    CLEAN_OUTPUT_BACKGROUND_EVENT,
-    readCurrentBackground(),
-  );
-}
-
-function publishCleanOutputBodyVisibility(visible: boolean) {
-  if (isCleanOutputWindow) return;
-  if (!cleanOutputMode) return;
-
-  void emitTo<boolean>(
-    CLEAN_OUTPUT_WINDOW_LABEL,
-    CLEAN_OUTPUT_BODY_VISIBILITY_EVENT,
-    visible,
-  );
-}
-
-function publishCleanOutputPose() {
-  if (isCleanOutputWindow) return;
-  if (!cleanOutputMode) return;
-
-  void emitTo<CleanOutputPosePayload>(
-    CLEAN_OUTPUT_WINDOW_LABEL,
-    CLEAN_OUTPUT_POSE_EVENT,
-    latestCleanOutputPose,
-  );
-}
-
-async function loadCleanOutputAvatar(payload: CleanOutputAvatarPayload) {
-  try {
-    cleanOutputAvatarLoaded = true;
-    applyCleanOutputBackground(payload.background);
-    avatarScene.setBodyVisible(payload.bodyVisible);
-    const ffl = await getFflContext();
-    await avatarScene.loadModelFromMiiBytes(
-      normalizeMiiBytes(new Uint8Array(payload.bytes)),
-      ffl,
-    );
-    applyCleanOutputPose(payload.pose);
-    if (emptyPreviewEl) emptyPreviewEl.hidden = true;
-    setStatus(`OBS Clean View rendering ${payload.name}.`, "success");
-  } catch (error) {
-    setStatus(userFacingError("AVATAR_RENDER_FAILED", error, { view: "clean output" }), "error");
-  }
-}
-
-function applyCleanOutputBackground(background: CleanOutputBackgroundPayload) {
-  cleanOutputBackgroundOverride = background;
-  updateAvatarBackground();
-}
-
-function applyCleanOutputPose(pose: CleanOutputPosePayload) {
-  latestCleanOutputPose = pose;
-  avatarScene.setExpression(pose.expressionIndex);
-  avatarScene.setHeadRotation(pose.headRotation);
 }
 
 function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
@@ -1393,10 +1129,9 @@ function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
   const displayedExpressionIndex = autoBlinkClosed
     ? withBlink(expressionIndex)
     : expressionIndex;
-  latestCleanOutputPose = { expressionIndex: displayedExpressionIndex, headRotation };
+  currentAvatarPose = { expressionIndex: displayedExpressionIndex, headRotation };
   avatarScene.setExpression(displayedExpressionIndex);
   avatarScene.setHeadRotation(headRotation);
-  publishCleanOutputPose();
 }
 
 function applyExpressionPose(expressionIndex: number, headRotation: HeadRotation) {
@@ -1409,50 +1144,11 @@ function syncExpressionSelect(expressionIndex: number) {
   if (expressionSelect) expressionSelect.value = String(expressionIndex);
 }
 
-function readCurrentBackground(): CleanOutputBackgroundPayload {
-  if (cleanOutputBackgroundOverride) return cleanOutputBackgroundOverride;
-
+function readCurrentBackground(): AvatarBackground {
   return {
     color: backgroundColorInput?.value ?? "#e8f0f7",
     transparent: isolateMode || (transparentBackgroundInput?.checked ?? false),
   };
-}
-
-function readCleanOutputAvatar(): CleanOutputStoredAvatar | null {
-  try {
-    const raw = localStorage.getItem(CLEAN_OUTPUT_AVATAR_STORAGE_KEY);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw) as Partial<CleanOutputStoredAvatar>;
-    if (typeof parsed.name !== "string" || !Array.isArray(parsed.bytes)) {
-      return null;
-    }
-    if (
-      parsed.bytes.length === 0 ||
-      !parsed.bytes.every(
-        (value) => Number.isInteger(value) && value >= 0 && value <= 255,
-      )
-    ) {
-      return null;
-    }
-
-    return {
-      name: parsed.name,
-      bytes: parsed.bytes,
-    };
-  } catch (error) {
-    console.warn("[MiiTuber] could not read OBS clean avatar", { error });
-    return null;
-  }
-}
-
-function saveCleanOutputAvatar(avatar: CleanOutputStoredAvatar) {
-  currentCleanOutputAvatar = avatar;
-  try {
-    localStorage.setItem(CLEAN_OUTPUT_AVATAR_STORAGE_KEY, JSON.stringify(avatar));
-  } catch (error) {
-    console.warn("[MiiTuber] could not save OBS clean avatar", { error });
-  }
 }
 
 function populateExpressionSelect() {
@@ -1550,16 +1246,8 @@ async function refreshMicrophoneList() {
 
 expressionSelect?.addEventListener("change", () => {
   const expressionIndex = Number(expressionSelect.value);
-  const resolvedExpressionIndex = applyExpressionPose(
-    expressionIndex,
-    latestCleanOutputPose.headRotation,
-  );
+  applyExpressionPose(expressionIndex, currentAvatarPose.headRotation);
   logRenderEvent("manual expression selected", { expressionIndex });
-  if (resolvedExpressionIndex !== expressionIndex) {
-    logRenderEvent("manual expression ignored while override is active", {
-      override: resolvedExpressionIndex,
-    });
-  }
 });
 
 autoBlinkInput?.addEventListener("change", () => {
@@ -1574,7 +1262,6 @@ bodyVisibleInput?.addEventListener("change", () => {
   const visible = bodyVisibleInput.checked;
   avatarScene.setBodyVisible(visible);
   writeBodyVisiblePreference(visible);
-  publishCleanOutputBodyVisibility(visible);
   logRenderEvent("body visibility toggled", { visible });
 });
 
@@ -1592,28 +1279,13 @@ backgroundColorInput?.addEventListener("input", () => {
   });
 });
 
-toggleCleanOutputButton?.addEventListener("click", () => {
-  setCleanOutputMode(!cleanOutputMode);
-});
-
 isolateCaptureButton?.addEventListener("click", () => {
   setIsolateMode(true);
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape") return;
-
-  if (isolateMode && !isCleanOutputWindow) {
+  if (event.key === "Escape" && isolateMode) {
     setIsolateMode(false);
-    return;
-  }
-
-  if (cleanOutputMode) {
-    if (isCleanOutputWindow) {
-      void hideCurrentCleanOutputWindow();
-      return;
-    }
-    setCleanOutputMode(false);
   }
 });
 
@@ -2065,7 +1737,7 @@ function easeHeadTowardNeutral(now: number) {
     return;
   }
 
-  const { headRotation } = latestCleanOutputPose;
+  const { headRotation } = currentAvatarPose;
   const { pitch, yaw, roll } = headRotation;
   if (Math.max(Math.abs(pitch), Math.abs(yaw), Math.abs(roll)) < 0.1) return;
 
@@ -2131,7 +1803,7 @@ function applyCoordinatedAvatarPose(
   // the expression and must not snap the head back to an old camera matrix.
   const headRotation =
     updateSource === "microphone" && !avatarPoseCoordinator.isFaceDetected()
-      ? latestCleanOutputPose.headRotation
+      ? currentAvatarPose.headRotation
       : pipelineFrame.headRotation;
   const expressionIndex = applyExpressionPose(
     pipelineFrame.expressionIndex,
@@ -2369,26 +2041,6 @@ function stopTracking(message?: string) {
   }
 }
 
-function setCleanOutputMode(enabled: boolean) {
-  if (isCleanOutputWindow) {
-    cleanOutputMode = enabled;
-    document.documentElement.classList.toggle("clean-output-mode", enabled);
-    document.body.classList.toggle("clean-output-mode", enabled);
-    updateAvatarBackground();
-    requestAnimationFrame(() => {
-      avatarScene.resize();
-    });
-    return;
-  }
-
-  if (enabled) {
-    void openCleanOutputWindow();
-  } else {
-    void closeCleanOutputWindow();
-  }
-  logRenderEvent("OBS clean output popup toggled", { enabled });
-}
-
 function setIsolateMode(enabled: boolean) {
   isolateMode = enabled;
   document.documentElement.classList.toggle("capture-isolate", enabled);
@@ -2425,32 +2077,13 @@ function setIsolateMode(enabled: boolean) {
 }
 
 function updateAvatarBackground() {
-  const background = readCurrentBackground();
-  const { color, transparent } = background;
-
-  if (isCleanOutputWindow) {
-    const outputColor = transparent ? "transparent" : color;
-    avatarScene.setBackground({ color, transparent });
-    document.documentElement.classList.toggle("transparent-output", transparent);
-    document.body.classList.toggle("transparent-output", transparent);
-    document.documentElement.style.setProperty("--avatar-background", outputColor);
-    document.documentElement.style.backgroundColor = outputColor;
-    document.body.style.backgroundColor = outputColor;
-    canvas.style.backgroundColor = outputColor;
-    return;
-  }
-
-  // In the workspace, "transparent" shows an alpha checkerboard behind the
-  // canvas (a preview) instead of making the whole window see-through — the
-  // latter blanked the entire view. Real OBS transparency still comes from the
-  // capture-isolate / clean-output paths.
+  const { color, transparent } = readCurrentBackground();
   avatarScene.setBackground({ color, transparent });
   previewFrameEl?.classList.toggle("transparent-preview", transparent);
   document.documentElement.style.setProperty("--avatar-background", color);
   document.documentElement.style.backgroundColor = "";
   document.body.style.backgroundColor = "";
   canvas.style.backgroundColor = "";
-  publishCleanOutputBackground();
 }
 
 function resetAvatarTrackingState() {
@@ -2694,7 +2327,7 @@ function tickAutoBlink() {
   if (closed === autoBlinkClosed) return;
 
   autoBlinkClosed = closed;
-  setAvatarPose(baseExpressionIndex, latestCleanOutputPose.headRotation);
+  setAvatarPose(baseExpressionIndex, currentAvatarPose.headRotation);
 }
 
 function initializeDebugInfoToggle() {
@@ -2719,7 +2352,6 @@ function replayCurrentTour() {
 
 function startTourIfNeeded(chapterId: TourChapterId) {
   if (
-    isCleanOutputWindow ||
     updateExperienceChecking ||
     updateModalActive ||
     activeTourChapterId === chapterId
@@ -2732,7 +2364,7 @@ function startTourIfNeeded(chapterId: TourChapterId) {
 }
 
 function startTour(chapterId: TourChapterId) {
-  if (isCleanOutputWindow || !tourRootEl) return;
+  if (!tourRootEl) return;
 
   endActiveTour();
   errorSpeaker?.dismiss();
@@ -2765,17 +2397,12 @@ function startTour(chapterId: TourChapterId) {
   presenter.start();
 }
 
-/**
- * Speaks an error through the Mii dialogue bubble. Additive to the status
- * toasts — never their replacement — and silently skipped while a tour owns
- * the overlay or in the OBS clean-output window.
- */
 function speakError(line: MiiErrorLine) {
   getErrorSpeaker()?.speak(line);
 }
 
 function getErrorSpeaker(): ErrorSpeaker | null {
-  if (isCleanOutputWindow || !tourRootEl) return null;
+  if (!tourRootEl) return null;
 
   errorSpeaker ??= new ErrorSpeaker({
     root: tourRootEl,
@@ -3256,8 +2883,6 @@ async function handleImportFile() {
 
   try {
     const buffer = await file.arrayBuffer();
-    // .miic files carry a valid FFLStoreData prefix; store the normalized
-    // form so every downstream consumer (render, thumbnails) just works.
     const miiBytes = normalizeMiiBytes(new Uint8Array(buffer));
     const bytes = Array.from(miiBytes);
     let thumbnailDataUrl: string | null = null;
@@ -3355,18 +2980,12 @@ async function renderMiiThumbnail(miiBytes: Uint8Array): Promise<string> {
 
 async function renderAvatarBytes(miiBytes: number[], name: string) {
   try {
-    // Resolve the FFL context FIRST. If AFLResHigh_2_3.dat is missing this
-    // blocks on the "choose the resource file" prompt, which owns the red
-    // status message + Choose-file button. Setting a "Rendering..." status
-    // before this resolves would clobber that prompt, leaving the user staring
-    // at a spinner with no idea they still need to pick the resource file.
     const ffl = await getFflContext();
     setStatus("Rendering with in-process FFL.js...");
     const loadResult = await avatarScene.loadModelFromMiiBytes(
       normalizeMiiBytes(new Uint8Array(miiBytes)),
       ffl,
     );
-    saveCleanOutputAvatar({ name, bytes: miiBytes });
     const expressionIndex = applyExpressionPose(FFLExpression.Normal, {
       pitch: 0,
       yaw: 0,
@@ -3380,8 +2999,6 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
     avatarLoaded = true;
     avatarHasExpressionVariants = loadResult.expressionCount > 0;
     setTrackingButtons();
-    setOutputButtons();
-    void publishCleanOutputAvatarSnapshot();
 
     logRenderEvent("avatar render succeeded", {
       name,
@@ -3400,8 +3017,6 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
     avatarLoaded = false;
     avatarHasExpressionVariants = false;
     setTrackingButtons();
-    setOutputButtons();
-    setCleanOutputMode(false);
     setStatus(userFacingError("AVATAR_RENDER_FAILED", error, {
       renderer: "ffl.js",
     }), "error");

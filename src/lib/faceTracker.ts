@@ -66,10 +66,7 @@ export class FaceTracker {
 
     const minFrameIntervalMs = maxFpsToMinIntervalMs(options.maxFps ?? 30);
 
-    // rAF stops entirely while the window is minimized or the webview is
-    // considered hidden, which would freeze pose events to the clean-output
-    // window (and thus OBS). Timers keep firing there, so fall back to
-    // setTimeout whenever the document reports hidden.
+    // Use a timer when the document is hidden because rAF can stop.
     const scheduleNextFrame = () => {
       if (!this.running) return;
       if (document.hidden) {

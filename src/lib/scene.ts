@@ -7,7 +7,6 @@ import { FFLExpression } from "./types";
 import { createCharModel, type FFLContext } from "./fflRenderer";
 import { attachBodyToCharModel, computeVisualBox } from "./bodyModel";
 
-/** Count of expressions FFL.js can render on demand (CharModel needs no pre-bake). */
 const FFL_SUPPORTED_EXPRESSION_COUNT = Object.values(FFLExpression).filter(
   (value): value is FFLExpression => typeof value === "number",
 ).length;
@@ -161,7 +160,6 @@ export class AvatarScene {
 
     return {
       meshCount,
-      // CharModel renders any expression on demand — no pre-baked variants.
       expressionCount: FFL_SUPPORTED_EXPRESSION_COUNT,
       ...framing,
     };
@@ -316,7 +314,7 @@ export class AvatarScene {
     this.controls.maxDistance = distance * 3;
 
     // Keep the user's orbit/zoom across canvas-shape changes (e.g. entering
-    // isolate/clean-output mode); only snap to the fitted view while they are
+    // isolate mode); only snap to the fitted view while they are
     // still on the default framing.
     if (!this.userAdjustedView) this.resetCameraView();
   }
