@@ -1,3 +1,4 @@
+import { clampNumber, roundTo } from "./math";
 import type { ExpressionScores } from "./types";
 
 export type SignalName = keyof ExpressionScores;
@@ -189,6 +190,39 @@ export function normalizeTuningProfile(profile: Partial<TuningProfile>): TuningP
     minimumHoldMs: Math.max(0, profile.minimumHoldMs ?? fallback.minimumHoldMs),
     calibration: normalizeCalibration(profile.calibration),
   };
+}
+
+export function oneEuroParamsFromSmoothing(percent: number): TuningProfile["oneEuro"] {
+  const t = clampNumber(percent, 0, 100) / 100;
+  return {
+    minCutoff: roundTo(4 - 8.25 * t + 4.5 * t * t, 3),
+    beta: roundTo(0.08 - 0.165 * t + 0.09 * t * t, 4),
+    derivativeCutoff: roundTo(3 - 5.4 * t + 2.8 * t * t, 3),
+  };
+}
+
+export function smoothingFromOneEuroParams(params: TuningProfile["oneEuro"]) {
+  let bestPercent = 50;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let percent = 0; percent <= 100; percent += 1) {
+    const candidate = oneEuroParamsFromSmoothing(percent);
+    const distance =
+      normalizedDistance(params.minCutoff, candidate.minCutoff, 4) +
+      normalizedDistance(params.beta, candidate.beta, 0.08) +
+      normalizedDistance(params.derivativeCutoff, candidate.derivativeCutoff, 3);
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestPercent = percent;
+    }
+  }
+
+  return bestPercent;
+}
+
+function normalizedDistance(a: number, b: number, scale: number) {
+  return Math.abs(a - b) / scale;
 }
 
 function normalizeCalibration(calibration?: Record<string, number>) {

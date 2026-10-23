@@ -223,9 +223,11 @@ import {
 import {
   createDefaultTuningProfile,
   normalizeTuningProfile,
+  oneEuroParamsFromSmoothing,
   parseTuningProfileJson,
   serializeTuningProfile,
   SIGNAL_NAMES,
+  smoothingFromOneEuroParams,
   type SignalName,
   type TuningProfile,
 } from "./lib/tuningProfile";
@@ -255,6 +257,7 @@ import {
   SHOW_DEBUG_INFO_STORAGE_KEY,
   writeBooleanPreference,
 } from "./lib/preferences";
+import { clamp01, clampNumber } from "./lib/math";
 import { openPopover } from "./lib/popover";
 import { createUpdateExperience } from "./lib/updateExperience";
 import {
@@ -682,9 +685,6 @@ function formatChannels(channels: ExpressionChannels) {
   return `eyes ${channels.eyes}, mouth ${channels.mouth}, emotion ${channels.emotion}`;
 }
 
-function clamp01(value: number) {
-  return Math.min(1, Math.max(0, value));
-}
 
 if (!viewerCanvas) {
   throw new Error("Missing #mii-viewer canvas");
@@ -1790,48 +1790,10 @@ function nonNegativeInputValue(input: HTMLInputElement, fallback: number) {
   return input.valueAsNumber >= 0 ? input.valueAsNumber : fallback;
 }
 
-function oneEuroParamsFromSmoothing(percent: number): TuningProfile["oneEuro"] {
-  const t = clampNumber(percent, 0, 100) / 100;
-  return {
-    minCutoff: roundTo(4 - 8.25 * t + 4.5 * t * t, 3),
-    beta: roundTo(0.08 - 0.165 * t + 0.09 * t * t, 4),
-    derivativeCutoff: roundTo(3 - 5.4 * t + 2.8 * t * t, 3),
-  };
-}
 
-function smoothingFromOneEuroParams(params: TuningProfile["oneEuro"]) {
-  let bestPercent = 50;
-  let bestDistance = Number.POSITIVE_INFINITY;
 
-  for (let percent = 0; percent <= 100; percent += 1) {
-    const candidate = oneEuroParamsFromSmoothing(percent);
-    const distance =
-      normalizedDistance(params.minCutoff, candidate.minCutoff, 4) +
-      normalizedDistance(params.beta, candidate.beta, 0.08) +
-      normalizedDistance(params.derivativeCutoff, candidate.derivativeCutoff, 3);
 
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestPercent = percent;
-    }
-  }
 
-  return bestPercent;
-}
-
-function normalizedDistance(a: number, b: number, scale: number) {
-  return Math.abs(a - b) / scale;
-}
-
-function roundTo(value: number, digits: number) {
-  const scale = 10 ** digits;
-  return Math.round(value * scale) / scale;
-}
-
-function clampNumber(value: number, min: number, max: number) {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, value));
-}
 
 function getLibraryStorage() {
   return window.localStorage;
