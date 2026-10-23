@@ -403,6 +403,24 @@ const oneEuroSmoothingInput = document.querySelector<HTMLInputElement>(
 const oneEuroSmoothingValueEl = document.querySelector<HTMLOutputElement>(
   "#one-euro-smoothing-value",
 );
+const headRotationOffsetPitchInput = document.querySelector<HTMLOutputElement>(
+  "#head-rot-pitch-offset",
+);
+const headRotationOffsetPitchValueEl = document.querySelector<HTMLOutputElement>(
+  "#head-rot-pitch-offset-value",
+);
+const headRotationOffsetRollInput = document.querySelector<HTMLOutputElement>(
+  "#head-rot-roll-offset",
+);
+const headRotationOffsetRollValueEl = document.querySelector<HTMLOutputElement>(
+  "#head-rot-roll-offset-value",
+);
+const headRotationOffsetYawInput = document.querySelector<HTMLOutputElement>(
+  "#head-rot-yaw-offset",
+);
+const headRotationOffsetYawValueEl = document.querySelector<HTMLOutputElement>(
+  "#head-rot-yaw-offset-value",
+);
 const showDebugInfoInput =
   document.querySelector<HTMLInputElement>("#show-debug-info");
 const advancedDebugInfoEl = document.querySelector<HTMLElement>(
@@ -1395,7 +1413,11 @@ function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
     : expressionIndex;
   latestCleanOutputPose = { expressionIndex: displayedExpressionIndex, headRotation };
   avatarScene.setExpression(displayedExpressionIndex);
-  avatarScene.setHeadRotation(headRotation);
+  avatarScene.setHeadRotation({
+    pitch: headRotation.pitch + tuningProfile.headRotationOffset.pitch,
+    roll: headRotation.roll + tuningProfile.headRotationOffset.roll,
+    yaw: headRotation.yaw + tuningProfile.headRotationOffset.yaw
+  });
   publishCleanOutputPose();
 }
 
@@ -1833,6 +1855,30 @@ function populateTuningControls() {
     );
     applyTuningProfile(tuningProfile);
   });
+
+  // Manually update the 3D avatar's pose, unless tracking is already updating it.
+  const manuallyUpdatePose = () => {
+    if (!tracking) {
+      setAvatarPose(baseExpressionIndex, tuningProfile.headRotationOffset);
+    }
+  }
+
+  headRotationOffsetPitchInput?.addEventListener("input", () => {
+    tuningProfile.headRotationOffset.pitch = parseInt(headRotationOffsetPitchInput.value);
+    applyTuningProfile(tuningProfile);
+    manuallyUpdatePose();
+  });
+  headRotationOffsetRollInput?.addEventListener("input", () => {
+    tuningProfile.headRotationOffset.roll = parseInt(headRotationOffsetRollInput.value);
+    applyTuningProfile(tuningProfile);
+    manuallyUpdatePose();
+  });
+  headRotationOffsetYawInput?.addEventListener("input", () => {
+    tuningProfile.headRotationOffset.yaw = parseInt(headRotationOffsetYawInput.value);
+    applyTuningProfile(tuningProfile);
+    manuallyUpdatePose();
+  });
+
   showDebugInfoInput?.addEventListener("change", () => {
     setDebugInfoVisible(showDebugInfoInput.checked);
     writeShowDebugInfoPreference(showDebugInfoInput.checked);
@@ -2026,6 +2072,26 @@ function renderTuningControls() {
   if (minimumHoldMsInput) {
     minimumHoldMsInput.value = String(tuningProfile.minimumHoldMs);
   }
+
+  if (headRotationOffsetPitchInput) {
+    headRotationOffsetPitchInput.value = String(tuningProfile.headRotationOffset.pitch)
+  }
+  if (headRotationOffsetPitchValueEl) {
+    headRotationOffsetPitchValueEl.textContent = formatHeadRotationValue(tuningProfile.headRotationOffset.pitch);
+  }
+  if (headRotationOffsetRollInput) {
+    headRotationOffsetRollInput.value = String(tuningProfile.headRotationOffset.roll)
+  }
+  if (headRotationOffsetRollValueEl) {
+    headRotationOffsetRollValueEl.textContent = formatHeadRotationValue(tuningProfile.headRotationOffset.roll);
+  }
+  if (headRotationOffsetYawInput) {
+    headRotationOffsetYawInput.value = String(tuningProfile.headRotationOffset.yaw)
+  }
+  if (headRotationOffsetYawValueEl) {
+    headRotationOffsetYawValueEl.textContent = formatHeadRotationValue(tuningProfile.headRotationOffset.yaw);
+  }
+
   micMouthTuningControlEl
     ?.querySelectorAll<HTMLInputElement>("input[data-mic-mouth-field]")
     .forEach((input) => {
@@ -3321,6 +3387,13 @@ function saveImportedAvatar() {
   } catch (error) {
     setImportStatus(userFacingError("AVATAR_SAVE_FAILED", error), "error");
   }
+}
+
+/**
+ * Format a head rotation offset value (pitch, yaw, roll) for display.
+ */
+function formatHeadRotationValue(value: number): string {
+  return value >= 0 ? `+${value}` : `${value}`;
 }
 
 async function selectAvatar(id: string) {

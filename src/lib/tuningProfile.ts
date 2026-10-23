@@ -1,4 +1,4 @@
-import type { ExpressionScores } from "./types";
+import type { ExpressionScores, HeadRotation } from "./types";
 
 export type SignalName = keyof ExpressionScores;
 
@@ -22,6 +22,7 @@ export type TuningProfile = {
     smoothing: number;
     activation: HysteresisSetting & { gain: number };
   };
+  headRotationOffset: HeadRotation;
   minimumHoldMs: number;
   calibration: Record<string, number>;
 };
@@ -67,6 +68,11 @@ export const DEFAULT_TUNING_PROFILE: TuningProfile = {
     smoothing: 0.35,
     activation: { enter: 0.45, exit: 0.32, gain: 1 },
   },
+  headRotationOffset: {
+    pitch: 0,
+    roll: 0,
+    yaw: 0,
+  },
   minimumHoldMs: 100,
   calibration: {},
 };
@@ -95,6 +101,7 @@ export function cloneTuningProfile(profile: TuningProfile): TuningProfile {
       ...profile.lipSync,
       activation: { ...profile.lipSync.activation },
     },
+    headRotationOffset: { ...profile.headRotationOffset },
     minimumHoldMs: profile.minimumHoldMs,
     calibration: { ...profile.calibration },
   };
@@ -185,6 +192,32 @@ export function normalizeTuningProfile(profile: Partial<TuningProfile>): TuningP
           3,
         ),
       },
+    },
+    headRotationOffset: {
+      pitch: clamp(
+        finiteOrDefault(
+          profile.headRotationOffset?.pitch,
+          fallback.headRotationOffset.pitch
+        ),
+        -45,
+        45
+      ),
+      roll: clamp(
+        finiteOrDefault(
+          profile.headRotationOffset?.roll,
+          fallback.headRotationOffset.roll
+        ),
+        -45,
+        45
+      ),
+      yaw: clamp(
+        finiteOrDefault(
+          profile.headRotationOffset?.yaw,
+          fallback.headRotationOffset.yaw
+        ),
+        -45,
+        45
+      ),
     },
     minimumHoldMs: Math.max(0, profile.minimumHoldMs ?? fallback.minimumHoldMs),
     calibration: normalizeCalibration(profile.calibration),

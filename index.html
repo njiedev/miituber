@@ -238,6 +238,29 @@
               </div>
               <div class="tuning-section">
                 <div class="tuning-section__header">
+                  <h3>Head Rotation Offset</h3>
+                </div>
+                <span class="hint">Adjusts the head's rotation by a fixed amount. Measured in degrees.</span>
+                <div class="signal-tuning-row">
+                  <label class="range-field filter-controls__wide">
+                    <span class="signal-control-panel">Pitch</span>
+                    <input id="head-rot-pitch-offset" type="range" min="-45" max="45" step="1" />
+                    <output id="head-rot-pitch-offset-value" for="head-rot-pitch-offset">0</output>
+                  </label>
+                  <label class="range-field filter-controls__wide">
+                    <span class="signal-control-panel">Roll</span>
+                    <input id="head-rot-roll-offset" type="range" min="-45" max="45" step="1" />
+                    <output id="head-rot-roll-offset-value" for="head-rot-roll-offset">0</output>
+                  </label>
+                  <label class="range-field filter-controls__wide">
+                    <span class="signal-control-panel">Yaw</span>
+                    <input id="head-rot-yaw-offset" type="range" min="-45" max="45" step="1" />
+                    <output id="head-rot-yaw-offset-value" for="head-rot-yaw-offset">0</output>
+                  </label>
+                </div>
+              </div>
+              <div class="tuning-section">
+                <div class="tuning-section__header">
                   <h3>Expression signals</h3>
                   <span>Enter, exit, and gain</span>
                 </div>
