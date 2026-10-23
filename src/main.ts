@@ -1,5 +1,5 @@
 import { appDataDir, join } from "@tauri-apps/api/path";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import {
   averageBlendshapeSamples,
@@ -264,6 +264,7 @@ import {
 } from "./lib/debugFormat";
 import { clamp01, clampNumber } from "./lib/math";
 import { openPopover } from "./lib/popover";
+import { TuningProfileStore } from "./lib/tuningProfileStore";
 import { createUpdateExperience } from "./lib/updateExperience";
 import {
   ErrorSpeaker,
@@ -274,9 +275,6 @@ import {
 } from "./lib/errorSpeaker";
 
 const AUTO_BLINK_TICK_MS = 30;
-const TUNING_PROFILE_STORAGE_KEY = "miituber.tuningProfile.v1";
-const TUNING_PROFILE_FILE_NAME = "miituber-tuning-profile.json";
-const TUNING_SAVE_DEBOUNCE_MS = 400;
 
 const searchParams = new URLSearchParams(window.location.search);
 
@@ -415,9 +413,7 @@ let avatarLoaded = false;
 let avatarHasExpressionVariants = false;
 let tracking = false;
 let tuningProfile = createDefaultTuningProfile();
-let tuningProfileStoragePath: string | null = null;
-let tuningSaveTimer: number | null = null;
-let tuningWriteQueue = Promise.resolve();
+const tuningProfileStore = new TuningProfileStore(isRunningInTauri());
 let calibrationSession: CalibrationSession | null = null;
 let latestExpressionScores: ExpressionScores = zeroExpressionScores();
 let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
@@ -917,26 +913,8 @@ resetProfileButton?.addEventListener("click", () => {
 });
 
 async function initializeTuningProfilePersistence() {
-  if (!isRunningInTauri()) {
-    if (tuningStorageNoteEl) {
-      tuningStorageNoteEl.textContent =
-        "Changes are saved automatically in this browser.";
-    }
-    try {
-      const savedProfile = localStorage.getItem(TUNING_PROFILE_STORAGE_KEY);
-      if (savedProfile) {
-        applyTuningProfile(parseTuningProfileJson(savedProfile), { persist: false });
-      }
-    } catch (error) {
-      setCalibrationStatus(userFacingError("TUNING_IMPORT_INVALID", error, {
-        action: "load browser working copy",
-      }), "error");
-    }
-    return;
-  }
-
   try {
-    tuningProfileStoragePath = await join(await appDataDir(), TUNING_PROFILE_FILE_NAME);
+    await tuningProfileStore.open();
   } catch (error) {
     setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
       action: "open automatic storage",
@@ -944,105 +922,55 @@ async function initializeTuningProfilePersistence() {
     return;
   }
   if (tuningStorageNoteEl) {
-    tuningStorageNoteEl.textContent = "Changes are saved automatically inside MiiTuber.";
-    tuningStorageNoteEl.title = "MiiTuber keeps a private working copy in its app data.";
-  }
-
-  let bytes: Uint8Array;
-  try {
-    bytes = await readFile(tuningProfileStoragePath);
-  } catch (error) {
-    // A missing file is the normal first-run case; defaults remain active.
-    console.info("[MiiTuber] no saved app-data tuning profile found", { error });
-    return;
+    if (tuningProfileStore.isTauri) {
+      tuningStorageNoteEl.textContent = "Changes are saved automatically inside MiiTuber.";
+      tuningStorageNoteEl.title = "MiiTuber keeps a private working copy in its app data.";
+    } else {
+      tuningStorageNoteEl.textContent = "Changes are saved automatically in this browser.";
+    }
   }
 
   try {
-    const savedProfile = new TextDecoder().decode(bytes);
-    applyTuningProfile(parseTuningProfileJson(savedProfile), { persist: false });
-    console.info("[MiiTuber] loaded tuning profile from app data");
+    const savedProfile = await tuningProfileStore.readWorkingCopy();
+    if (savedProfile) {
+      applyTuningProfile(parseTuningProfileJson(savedProfile), { persist: false });
+    }
   } catch (error) {
     setCalibrationStatus(userFacingError("TUNING_IMPORT_INVALID", error, {
-      action: "load automatic working copy",
+      action: tuningProfileStore.isTauri
+        ? "load automatic working copy"
+        : "load browser working copy",
     }), "error");
   }
 }
 
 function scheduleTuningProfileSave() {
-  if (tuningSaveTimer !== null) window.clearTimeout(tuningSaveTimer);
-  tuningSaveTimer = window.setTimeout(() => {
-    tuningSaveTimer = null;
-    const json = serializeTuningProfile(tuningProfile);
-    tuningWriteQueue = tuningWriteQueue
-      .then(() => persistTuningProfile(json))
-      .catch((error) => {
-        setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
-          action: "automatic save",
-        }), "error");
-      });
-  }, TUNING_SAVE_DEBOUNCE_MS);
-}
-
-async function persistTuningProfile(json: string) {
-  if (!isRunningInTauri()) {
-    localStorage.setItem(TUNING_PROFILE_STORAGE_KEY, json);
-  } else {
-    const appDataPath = await appDataDir();
-    await mkdir(appDataPath, { recursive: true });
-    tuningProfileStoragePath ??= await join(appDataPath, TUNING_PROFILE_FILE_NAME);
-    await writeFile(tuningProfileStoragePath, new TextEncoder().encode(json));
-  }
-
+  tuningProfileStore.scheduleSave(
+    () => serializeTuningProfile(tuningProfile),
+    (error) => {
+      setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
+        action: "automatic save",
+      }), "error");
+    },
+  );
 }
 
 saveProfileButton?.addEventListener("click", async () => {
-  const json = serializeTuningProfile(tuningProfile);
-  if (isRunningInTauri()) {
-    try {
-      const path = await saveDialog({
-        title: "Save tuning profile",
-        defaultPath: TUNING_PROFILE_FILE_NAME,
-        filters: [{ name: "JSON profile", extensions: ["json"] }],
-      });
-      if (!path) return;
-      await writeFile(path, new TextEncoder().encode(json));
+  try {
+    if (await tuningProfileStore.saveCopy(serializeTuningProfile(tuningProfile))) {
       setCalibrationStatus("Saved a copy of your tuning profile.", "success");
-    } catch (error) {
-      setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
-        action: "save copy",
-      }), "error");
     }
-    return;
+  } catch (error) {
+    setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
+      action: "save copy",
+    }), "error");
   }
-
-  const url = URL.createObjectURL(
-    new Blob([json], { type: "application/json;charset=utf-8" }),
-  );
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "miituber-tuning-profile.json";
-  link.click();
-  URL.revokeObjectURL(url);
-  setCalibrationStatus("Saved a copy of your tuning profile.", "success");
 });
 
 loadProfileButton?.addEventListener("click", async () => {
   try {
-    let profileJson: string | null = null;
-    if (isRunningInTauri()) {
-      const selected = await openDialog({
-        title: "Import tuning profile",
-        multiple: false,
-        directory: false,
-        filters: [{ name: "JSON profile", extensions: ["json"] }],
-      });
-      if (typeof selected !== "string") return;
-      profileJson = new TextDecoder().decode(await readFile(selected));
-    } else {
-      const file = await chooseBrowserJsonFile();
-      if (!file) return;
-      profileJson = await file.text();
-    }
+    const profileJson = await tuningProfileStore.importCopy();
+    if (profileJson === null) return;
 
     applyTuningProfile(parseTuningProfileJson(profileJson));
     setCalibrationStatus("Imported your tuning profile.", "success");
@@ -1052,18 +980,6 @@ loadProfileButton?.addEventListener("click", async () => {
     }), "error");
   }
 });
-
-function chooseBrowserJsonFile(): Promise<File | null> {
-  return new Promise((resolve) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "application/json,.json";
-    input.addEventListener("change", () => resolve(input.files?.[0] ?? null), {
-      once: true,
-    });
-    input.click();
-  });
-}
 
 function populateTuningControls() {
   if (signalTuningControlsEl) {
