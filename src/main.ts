@@ -262,6 +262,13 @@ import {
 } from "./lib/tour";
 import { TourPresenter } from "./lib/tourPresenter";
 import {
+  AUTO_BLINK_STORAGE_KEY,
+  BODY_VISIBLE_STORAGE_KEY,
+  readBooleanPreference,
+  SHOW_DEBUG_INFO_STORAGE_KEY,
+  writeBooleanPreference,
+} from "./lib/preferences";
+import {
   ErrorSpeaker,
   miiAvatarLoadErrorLine,
   miiCameraErrorLine,
@@ -269,10 +276,7 @@ import {
   type MiiErrorLine,
 } from "./lib/errorSpeaker";
 
-const BODY_VISIBLE_STORAGE_KEY = "miituber.bodyVisible.v1";
-const AUTO_BLINK_STORAGE_KEY = "miituber.autoBlink.v1";
 const AUTO_BLINK_TICK_MS = 30;
-const SHOW_DEBUG_INFO_STORAGE_KEY = "miituber.showDebugInfo.v1";
 const LAST_SEEN_RELEASE_NOTES_KEY = "miituber.lastSeenReleaseNotesVersion.v1";
 const LAST_LAUNCHED_VERSION_KEY = "miituber.lastLaunchedVersion.v1";
 const TUNING_PROFILE_STORAGE_KEY = "miituber.tuningProfile.v1";
@@ -1252,7 +1256,7 @@ expressionSelect?.addEventListener("change", () => {
 
 autoBlinkInput?.addEventListener("change", () => {
   const enabled = autoBlinkInput.checked;
-  writeAutoBlinkPreference(enabled);
+  writeBooleanPreference(AUTO_BLINK_STORAGE_KEY, enabled);
   expressionPipeline.setSuppressBriefBlinks(enabled);
   tickAutoBlink();
   logRenderEvent("auto blink toggled", { enabled });
@@ -1261,7 +1265,7 @@ autoBlinkInput?.addEventListener("change", () => {
 bodyVisibleInput?.addEventListener("change", () => {
   const visible = bodyVisibleInput.checked;
   avatarScene.setBodyVisible(visible);
-  writeBodyVisiblePreference(visible);
+  writeBooleanPreference(BODY_VISIBLE_STORAGE_KEY, visible);
   logRenderEvent("body visibility toggled", { visible });
 });
 
@@ -1507,7 +1511,7 @@ function populateTuningControls() {
   });
   showDebugInfoInput?.addEventListener("change", () => {
     setDebugInfoVisible(showDebugInfoInput.checked);
-    writeShowDebugInfoPreference(showDebugInfoInput.checked);
+    writeBooleanPreference(SHOW_DEBUG_INFO_STORAGE_KEY, showDebugInfoInput.checked);
   });
   minimumHoldMsInput?.addEventListener("change", () => {
     tuningProfile.minimumHoldMs = nonNegativeInputValue(
@@ -2232,89 +2236,20 @@ function getTourStorage() {
   return window.localStorage;
 }
 
-function readBodyVisiblePreference() {
-  try {
-    const raw = localStorage.getItem(BODY_VISIBLE_STORAGE_KEY);
-    if (raw === null) return true;
 
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === "boolean" ? parsed : true;
-  } catch (error) {
-    console.warn("[MiiTuber] could not read body visibility preference", {
-      error,
-    });
-    return true;
-  }
-}
 
-function readShowDebugInfoPreference() {
-  try {
-    const raw = localStorage.getItem(SHOW_DEBUG_INFO_STORAGE_KEY);
-    if (raw === null) return false;
 
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === "boolean" ? parsed : false;
-  } catch (error) {
-    console.warn("[MiiTuber] could not read debug info preference", {
-      error,
-    });
-    return false;
-  }
-}
-
-function writeBodyVisiblePreference(visible: boolean) {
-  try {
-    localStorage.setItem(BODY_VISIBLE_STORAGE_KEY, JSON.stringify(visible));
-  } catch (error) {
-    console.warn("[MiiTuber] could not save body visibility preference", {
-      error,
-    });
-  }
-}
-
-function writeShowDebugInfoPreference(visible: boolean) {
-  try {
-    localStorage.setItem(SHOW_DEBUG_INFO_STORAGE_KEY, JSON.stringify(visible));
-  } catch (error) {
-    console.warn("[MiiTuber] could not save debug info preference", {
-      error,
-      visible,
-    });
-  }
-}
 
 function initializeBodyVisibleToggle() {
-  const visible = readBodyVisiblePreference();
+  const visible = readBooleanPreference(BODY_VISIBLE_STORAGE_KEY, true);
   if (bodyVisibleInput) bodyVisibleInput.checked = visible;
   avatarScene.setBodyVisible(visible);
 }
 
-function readAutoBlinkPreference() {
-  try {
-    const raw = localStorage.getItem(AUTO_BLINK_STORAGE_KEY);
-    if (raw === null) return true;
 
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === "boolean" ? parsed : true;
-  } catch (error) {
-    console.warn("[MiiTuber] could not read auto blink preference", { error });
-    return true;
-  }
-}
-
-function writeAutoBlinkPreference(enabled: boolean) {
-  try {
-    localStorage.setItem(AUTO_BLINK_STORAGE_KEY, JSON.stringify(enabled));
-  } catch (error) {
-    console.warn("[MiiTuber] could not save auto blink preference", {
-      error,
-      enabled,
-    });
-  }
-}
 
 function initializeAutoBlink() {
-  const enabled = readAutoBlinkPreference();
+  const enabled = readBooleanPreference(AUTO_BLINK_STORAGE_KEY, true);
   if (autoBlinkInput) autoBlinkInput.checked = enabled;
   expressionPipeline.setSuppressBriefBlinks(enabled);
   window.setInterval(tickAutoBlink, AUTO_BLINK_TICK_MS);
@@ -2331,7 +2266,7 @@ function tickAutoBlink() {
 }
 
 function initializeDebugInfoToggle() {
-  setDebugInfoVisible(readShowDebugInfoPreference());
+  setDebugInfoVisible(readBooleanPreference(SHOW_DEBUG_INFO_STORAGE_KEY, false));
 }
 
 function setDebugInfoVisible(visible: boolean) {
