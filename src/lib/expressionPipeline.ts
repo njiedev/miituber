@@ -1,5 +1,6 @@
 import { SustainedSignalGate } from "./autoBlink";
 import { mapToExpression } from "./expressionMapper";
+import { mirrorBlendshapes, mirrorTransformMatrix } from "./mirrorTracking";
 import {
   BlendshapeSmoother,
   ExpressionSignalTracker,
@@ -54,6 +55,7 @@ export class ExpressionPipeline {
   private blinkLeftGate = new SustainedSignalGate();
   private blinkRightGate = new SustainedSignalGate();
   private suppressBriefBlinks = false;
+  private mirrorTracking = false;
 
   constructor(private profile: TuningProfile) {
     this.signalTracker = new ExpressionSignalTracker(profile);
@@ -85,17 +87,30 @@ export class ExpressionPipeline {
     this.suppressBriefBlinks = enabled;
   }
 
+  setMirrorTracking(enabled: boolean) {
+    if (this.mirrorTracking === enabled) return;
+    this.mirrorTracking = enabled;
+    this.reset();
+  }
+
   processFrame(
     blendshapes: BlendshapeCategory[],
-    transformMatrix: Float32Array | undefined,
+    cameraTransformMatrix: Float32Array | undefined,
     nowMs: number,
     externalMouthOpenScore = 0,
     mouthOpenSource: MouthOpenSource = "camera",
   ): ExpressionPipelineFrame {
-    const calibratedBlendshapes = calibrateBlendshapes(
+    const subtractedBlendshapes = calibrateBlendshapes(
       blendshapes,
       this.profile.calibration,
     );
+    const calibratedBlendshapes = this.mirrorTracking
+      ? mirrorBlendshapes(subtractedBlendshapes)
+      : subtractedBlendshapes;
+    const transformMatrix =
+      this.mirrorTracking && cameraTransformMatrix
+        ? mirrorTransformMatrix(cameraTransformMatrix)
+        : cameraTransformMatrix;
     const smoothedBlendshapes = this.blendshapeSmoother.update(
       calibratedBlendshapes,
       nowMs,

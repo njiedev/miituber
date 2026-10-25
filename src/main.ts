@@ -251,6 +251,7 @@ import { TourPresenter } from "./lib/tourPresenter";
 import {
   AUTO_BLINK_STORAGE_KEY,
   BODY_VISIBLE_STORAGE_KEY,
+  MIRROR_TRACKING_STORAGE_KEY,
   readBooleanPreference,
   SHOW_DEBUG_INFO_STORAGE_KEY,
   writeBooleanPreference,
@@ -311,6 +312,7 @@ const previewFrameEl = document.querySelector<HTMLElement>(".preview-frame");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
 const bodyVisibleInput = document.querySelector<HTMLInputElement>("#body-visible");
 const autoBlinkInput = document.querySelector<HTMLInputElement>("#auto-blink");
+const mirrorTrackingInput = document.querySelector<HTMLInputElement>("#mirror-tracking");
 const transparentBackgroundInput = document.querySelector<HTMLInputElement>(
   "#transparent-background",
 );
@@ -673,6 +675,7 @@ async function initializeMainWindow() {
   updateAvatarBackground();
   initializeBodyVisibleToggle();
   initializeAutoBlink();
+  initializeMirrorTracking();
   initializeDebugInfoToggle();
   resetAvatarTrackingState();
   setTrackingButtons();
@@ -829,6 +832,13 @@ autoBlinkInput?.addEventListener("change", () => {
   expressionPipeline.setSuppressBriefBlinks(enabled);
   tickAutoBlink();
   logRenderEvent("auto blink toggled", { enabled });
+});
+
+mirrorTrackingInput?.addEventListener("change", () => {
+  const enabled = mirrorTrackingInput.checked;
+  writeBooleanPreference(MIRROR_TRACKING_STORAGE_KEY, enabled);
+  expressionPipeline.setMirrorTracking(enabled);
+  logRenderEvent("mirror tracking toggled", { enabled });
 });
 
 bodyVisibleInput?.addEventListener("change", () => {
@@ -1704,6 +1714,12 @@ function initializeAutoBlink() {
   if (autoBlinkInput) autoBlinkInput.checked = enabled;
   expressionPipeline.setSuppressBriefBlinks(enabled);
   window.setInterval(tickAutoBlink, AUTO_BLINK_TICK_MS);
+}
+
+function initializeMirrorTracking() {
+  const enabled = readBooleanPreference(MIRROR_TRACKING_STORAGE_KEY, false);
+  if (mirrorTrackingInput) mirrorTrackingInput.checked = enabled;
+  expressionPipeline.setMirrorTracking(enabled);
 }
 
 function tickAutoBlink() {
