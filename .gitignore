@@ -20,10 +20,13 @@ src-tauri/*.key*
 AGENTS.md
 docs/
 .claude/
+CLAUDE.md
+CREATOR_GUIDE.md
+to do list
 
 # Personal Mii fixtures used only by local dev/capture scripts
-mee.ffsd
-mee*.miic
+*.ffsd
+*.miic
 
 # Nintendo FFL resource file — user-supplied, never redistribute.
 # Glob covers any location/suffix (public/, dist/, .bak, etc.).
