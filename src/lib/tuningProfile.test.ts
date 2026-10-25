@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   createDefaultTuningProfile,
   normalizeTuningProfile,
+  oneEuroParamsFromSmoothing,
   parseTuningProfileJson,
   serializeTuningProfile,
+  smoothingFromOneEuroParams,
 } from "./tuningProfile";
 
 describe("tuning profile", () => {
@@ -79,5 +81,11 @@ describe("tuning profile", () => {
       exit: 0.32,
       gain: 1,
     });
+  });
+
+  it("round-trips the smoothing slider through one-euro params", () => {
+    for (const percent of [0, 25, 50, 75, 100]) {
+      expect(smoothingFromOneEuroParams(oneEuroParamsFromSmoothing(percent))).toBe(percent);
+    }
   });
 });

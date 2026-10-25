@@ -11,7 +11,6 @@ export type AppErrorCode =
   | "AVATAR_FILE_INVALID"
   | "AVATAR_SAVE_FAILED"
   | "AVATAR_RENDER_FAILED"
-  | "CLEAN_VIEW_FAILED"
   | "TUNING_IMPORT_INVALID"
   | "TUNING_SAVE_FAILED"
   | "UPDATE_FAILED"
@@ -85,11 +84,6 @@ const ERROR_DETAILS: Record<AppErrorCode, Omit<AppErrorDetails, "code">> = {
   AVATAR_RENDER_FAILED: {
     title: "Mii could not be displayed",
     message: "Try the Mii file again. If it keeps happening, restart MiiTuber.",
-    severity: "error",
-  },
-  CLEAN_VIEW_FAILED: {
-    title: "OBS Clean View could not open",
-    message: "Close any existing Clean View window, restart MiiTuber, and try again.",
     severity: "error",
   },
   TUNING_IMPORT_INVALID: {

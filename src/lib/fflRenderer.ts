@@ -4,20 +4,8 @@ import type { CharModel, FFL as FFLContext } from "ffl.js";
 export type { FFLContext };
 
 /**
- * In-process FFL renderer.
- *
- * Wraps FFL.js initialization behind a single lazy `ensureReady()` promise so
- * the rest of the app never touches the WASM/resource lifecycle directly. This
- * is the shared seam used by every Mii-rendering view.
- *
- * FFL.js (and its Emscripten WASM module) are imported *dynamically* — they load
- * only when FFL is first used, keeping app boot light and keeping this module
- * importable even before the git dependency is installed (so unit tests that
- * touch AvatarScene don't need the WASM package present).
- *
- * The WASM URL and the resource (`AFLResHigh_2_3.dat`) bytes are injected by the
- * caller — that keeps this module agnostic about offline (bundled .wasm + local
- * .dat) vs. dev (CDN .wasm) resolution, which is decided at wiring time.
+ * Share one FFL initialization promise per page. The caller supplies the
+ * resource bytes and WASM URL. Load FFL modules when initialization starts.
  */
 export type FflInitOptions = {
   /** Raw bytes of AFLResHigh_2_3.dat (user-supplied). */
@@ -59,23 +47,11 @@ export function isInitStarted(): boolean {
   return initPromise !== null;
 }
 
-/**
- * Build a CharModel from raw Mii bytes. Requires `ensureReady()` to have
- * resolved first. The returned model's `.meshes` should be added to a scene,
- * and `.dispose()` called when replacing it.
- */
-/**
- * Highest standard face-driven expression (FFLExpression 0..18). These are the
- * expressions MediaPipe face-tracking maps onto, so they must all be baked so
- * `setExpression()` never throws ExpressionNotSet at runtime. Stylized extras
- * (heart eyes, cat, etc.) are enabled separately by the hotkey feature.
- */
-const MAX_FACE_EXPRESSION = 18;
+const MAX_STANDARD_EXPRESSION = 18;
 
 /**
- * `extraExpressions` opts in stylized extras beyond the face-driven 0..18
- * (e.g. STUNNED 69) — expressions must be baked at CharModel creation or
- * `setExpression()` throws ExpressionNotSet later.
+ * Prepare standard expressions 0..18 and any extra IDs at model creation.
+ * Call dispose() when the model is replaced.
  */
 export async function createCharModel(
   ffl: FFLContext,
@@ -91,16 +67,14 @@ export async function createCharModel(
     import("ffl.js/materials/FFLShaderMaterial.js"),
   ]);
 
-  // Default desc enables only NORMAL (allExpressionFlag [1,0,0]); widen it so
-  // every face-driven expression is baked and switchable live.
-  const faceExpressions = Array.from(
-    { length: MAX_FACE_EXPRESSION + 1 },
+  const standardExpressions = Array.from(
+    { length: MAX_STANDARD_EXPRESSION + 1 },
     (_, index) => index,
   );
   const desc = {
     ...FFLCharModelDescDefault,
     allExpressionFlag: makeExpressionFlag([
-      ...faceExpressions,
+      ...standardExpressions,
       ...extraExpressions,
     ]),
   };

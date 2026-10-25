@@ -410,10 +410,7 @@ select {
   overflow: hidden;
 }
 
-/* Transparent-background preview: an alpha checkerboard behind the canvas so
-   the Mii reads as floating on transparency while the workspace UI stays
-   visible. True window transparency (for OBS) still comes from the
-   capture-isolate / clean-output paths, never from this. */
+/* Show a checkerboard behind the transparent canvas in the workspace. */
 .preview-frame.transparent-preview {
   background-color: #eef0f2;
   background-image:
@@ -643,7 +640,6 @@ select {
 
 #tracking-status,
 #lip-sync-status,
-#output-status,
 #calibration-status {
   margin: 0;
   color: var(--text-soft);
@@ -656,7 +652,6 @@ select {
 }
 
 #tracking-status[data-tone="success"],
-#output-status[data-tone="success"],
 #lip-sync-status[data-tone="success"],
 #calibration-status[data-tone="success"] {
   color: var(--success);
@@ -1684,60 +1679,6 @@ select {
   .tour-dialogue__next {
     animation: none;
   }
-}
-
-/* ---- Clean output window ---- */
-html.clean-output-mode,
-body.clean-output-mode {
-  overflow: hidden;
-  background: var(--avatar-background);
-}
-
-html.clean-output-window.transparent-output,
-body.clean-output-window.transparent-output,
-body.clean-output-window.transparent-output .preview-panel,
-body.clean-output-window.transparent-output .preview-frame,
-body.clean-output-window.transparent-output #mii-viewer {
-  background: transparent !important;
-  background-color: transparent !important;
-}
-
-body.clean-output-mode .appbar,
-body.clean-output-mode .side-rail,
-body.clean-output-mode .menu-popover,
-body.clean-output-mode .status-toast,
-body.clean-output-mode .library-screen,
-body.clean-output-mode .modal-scrim,
-body.clean-output-mode .tour-root {
-  display: none !important;
-}
-
-body.clean-output-mode .content {
-  height: 100vh;
-}
-
-body.clean-output-mode .workspace {
-  display: block;
-  height: 100vh;
-}
-
-body.clean-output-mode .preview-panel {
-  width: 100vw;
-  height: 100vh;
-  padding: 0;
-  background: var(--avatar-background);
-}
-
-body.clean-output-mode .preview-frame {
-  width: 100vw;
-  height: 100vh;
-  border: 0;
-  border-radius: 0;
-  background: var(--avatar-background);
-}
-
-body.clean-output-mode .empty-preview {
-  display: none;
 }
 
 /* ---- Capture isolate (main window transparent for OBS) ---- */

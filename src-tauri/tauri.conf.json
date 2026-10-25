@@ -24,22 +24,6 @@
         "transparent": true,
         "backgroundThrottling": "disabled",
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --autoplay-policy=no-user-gesture-required --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling"
-      },
-      {
-        "label": "clean-output",
-        "url": "/?view=clean-output",
-        "title": "MiiTuber OBS Clean View",
-        "width": 720,
-        "height": 720,
-        "minWidth": 320,
-        "minHeight": 320,
-        "resizable": true,
-        "decorations": true,
-        "transparent": true,
-        "visible": false,
-        "backgroundColor": "#00000000",
-        "backgroundThrottling": "disabled",
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --autoplay-policy=no-user-gesture-required --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling"
       }
     ],
     "security": {

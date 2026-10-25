@@ -1,14 +1,6 @@
-import { getVersion } from "@tauri-apps/api/app";
-import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
-import {
-  check as checkForUpdate,
-  type Update,
-} from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
 import {
   averageBlendshapeSamples,
   ExpressionPipeline,
@@ -21,7 +13,7 @@ import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
 import { AvatarPoseCoordinator } from "./lib/avatarPoseCoordinator";
 import { AutoBlinker, withBlink } from "./lib/autoBlink";
 import { LipSyncEnvelope, rootMeanSquare } from "./lib/lipSync";
-import { AvatarScene } from "./lib/scene";
+import { AvatarScene, type AvatarBackground } from "./lib/scene";
 import { ensureReady, type FFLContext } from "./lib/fflRenderer";
 import { normalizeMiiBytes } from "./lib/miiData";
 import { renderMiiThumbnailDataUrl } from "./lib/miiThumbnail";
@@ -31,15 +23,7 @@ import {
   reportAppError,
   type AppErrorCode,
 } from "./lib/appDiagnostics";
-import {
-  hasLegacyInstallData,
-  releaseNotesForVersion,
-  shouldShowReleaseNotes,
-} from "./lib/releaseNotes";
 
-// Bundled assets served from Vite's public/ dir.
-// NOTE: shipping should load a user-supplied .dat from disk instead of bundling
-// it (see docs/research/roadmap.md Phase 2 — do not redistribute Nintendo data).
 const FFL_RESOURCE_FILE_NAME = "AFLResHigh_2_3.dat";
 const FFL_RESOURCE_URL = "/AFLResHigh_2_3.dat";
 const FFL_WASM_URL = "/ffl-emscripten.wasm";
@@ -61,13 +45,7 @@ async function getFflContext(): Promise<FFLContext> {
   return fflContextPromise;
 }
 
-// Warm the FFL renderer at launch so the first-run "choose AFLResHigh_2_3.dat"
-// prompt lands on the reachable main-window toast. Deferring until the first
-// render (importing a Mii) makes the prompt fire while the import modal's
-// scrim (z-index 100) is covering the toast (z-index 30), so the user can
-// never see or click it — the app just looks stuck on "Rendering a preview...".
-// Prompting up front also matches the documented first-run behaviour and
-// warms the WASM before the user needs it.
+// Load the resource before import so the setup gate appears at startup.
 async function prewarmFflRenderer(): Promise<void> {
   try {
     await getFflContext();
@@ -234,10 +212,8 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   ) as ArrayBuffer;
 }
 import {
-  FFL_EXPRESSION_LABELS,
   FFLExpression,
   type BlendshapeCategory,
-  type ExpressionChannels,
   type ExpressionScores,
   type ExpressionSignals,
   type HeadRotation,
@@ -245,16 +221,17 @@ import {
 import {
   createDefaultTuningProfile,
   normalizeTuningProfile,
+  oneEuroParamsFromSmoothing,
   parseTuningProfileJson,
   serializeTuningProfile,
   SIGNAL_NAMES,
+  smoothingFromOneEuroParams,
   type SignalName,
   type TuningProfile,
 } from "./lib/tuningProfile";
 import {
   addAvatar,
   getAvatar,
-  LIBRARY_STORAGE_KEY,
   readLibrary,
   removeAvatar,
   renameAvatar,
@@ -265,13 +242,30 @@ import {
 import {
   readTourState,
   shouldAutoStart,
-  TOUR_STORAGE_KEY,
   TOUR_CHAPTERS,
   TourController,
   writeTourState,
   type TourChapterId,
 } from "./lib/tour";
 import { TourPresenter } from "./lib/tourPresenter";
+import {
+  AUTO_BLINK_STORAGE_KEY,
+  BODY_VISIBLE_STORAGE_KEY,
+  readBooleanPreference,
+  SHOW_DEBUG_INFO_STORAGE_KEY,
+  writeBooleanPreference,
+} from "./lib/preferences";
+import {
+  expressionLabel,
+  formatChannels,
+  formatExpressionScores,
+  formatScore,
+  formatTopBlendshapes,
+} from "./lib/debugFormat";
+import { clamp01, clampNumber } from "./lib/math";
+import { openPopover } from "./lib/popover";
+import { TuningProfileStore } from "./lib/tuningProfileStore";
+import { createUpdateExperience } from "./lib/updateExperience";
 import {
   ErrorSpeaker,
   miiAvatarLoadErrorLine,
@@ -280,34 +274,9 @@ import {
   type MiiErrorLine,
 } from "./lib/errorSpeaker";
 
-const CLEAN_OUTPUT_WINDOW_LABEL = "clean-output";
-const CLEAN_OUTPUT_VIEW = "clean-output";
-const CLEAN_OUTPUT_AVATAR_STORAGE_KEY = "miituber.cleanOutputAvatar.v1";
-const BODY_VISIBLE_STORAGE_KEY = "miituber.bodyVisible.v1";
-const AUTO_BLINK_STORAGE_KEY = "miituber.autoBlink.v1";
 const AUTO_BLINK_TICK_MS = 30;
-const SHOW_DEBUG_INFO_STORAGE_KEY = "miituber.showDebugInfo.v1";
-const LAST_SEEN_RELEASE_NOTES_KEY = "miituber.lastSeenReleaseNotesVersion.v1";
-const LAST_LAUNCHED_VERSION_KEY = "miituber.lastLaunchedVersion.v1";
-const TUNING_PROFILE_STORAGE_KEY = "miituber.tuningProfile.v1";
-const TUNING_PROFILE_FILE_NAME = "miituber-tuning-profile.json";
-const TUNING_SAVE_DEBOUNCE_MS = 400;
-const LEGACY_INSTALL_STORAGE_KEYS = [
-  LIBRARY_STORAGE_KEY,
-  TOUR_STORAGE_KEY,
-  CLEAN_OUTPUT_AVATAR_STORAGE_KEY,
-  BODY_VISIBLE_STORAGE_KEY,
-  SHOW_DEBUG_INFO_STORAGE_KEY,
-] as const;
-const CLEAN_OUTPUT_AVATAR_EVENT = "clean-output-avatar";
-const CLEAN_OUTPUT_BACKGROUND_EVENT = "clean-output-background";
-const CLEAN_OUTPUT_BODY_VISIBILITY_EVENT = "clean-output-body-visibility";
-const CLEAN_OUTPUT_POSE_EVENT = "clean-output-pose";
-const CLEAN_OUTPUT_READY_EVENT = "clean-output-ready";
-const CLEAN_OUTPUT_HIDDEN_EVENT = "clean-output-hidden";
 
 const searchParams = new URLSearchParams(window.location.search);
-const isCleanOutputWindow = searchParams.get("view") === CLEAN_OUTPUT_VIEW;
 
 const fileInput = document.querySelector<HTMLInputElement>("#mii-file");
 const statusEl = document.querySelector<HTMLElement>("#status");
@@ -413,10 +382,6 @@ const minimumHoldMsInput =
 const micMouthTuningControlEl = document.querySelector<HTMLElement>(
   "#mic-mouth-tuning-control",
 );
-const toggleCleanOutputButton = document.querySelector<HTMLButtonElement>(
-  "#toggle-clean-output-button",
-);
-const outputStatusEl = document.querySelector<HTMLElement>("#output-status");
 const microphoneSelect =
   document.querySelector<HTMLSelectElement>("#microphone-select");
 const mouthSourceSelect =
@@ -442,48 +407,13 @@ const libraryActionBody =
   document.querySelector<HTMLElement>("#library-action-body");
 const libraryActionFooter =
   document.querySelector<HTMLElement>("#library-action-footer");
-const updateModal = document.querySelector<HTMLElement>("#update-modal");
-const updateCard = document.querySelector<HTMLElement>("#update-card");
-const updateModalImage =
-  document.querySelector<HTMLImageElement>("#update-modal-image");
-const updateModalTitle =
-  document.querySelector<HTMLElement>("#update-modal-title");
-const updateModalMessage =
-  document.querySelector<HTMLElement>("#update-modal-message");
-const updateModalNotes =
-  document.querySelector<HTMLUListElement>("#update-modal-notes");
-const updateModalFooterNote = document.querySelector<HTMLElement>(
-  "#update-modal-footer-note",
-);
-const updateModalProgressWrap = document.querySelector<HTMLElement>(
-  "#update-modal-progress-wrap",
-);
-const updateModalProgress =
-  document.querySelector<HTMLProgressElement>("#update-modal-progress");
-const updateModalProgressLabel = document.querySelector<HTMLElement>(
-  "#update-modal-progress-label",
-);
-const updateModalDetail =
-  document.querySelector<HTMLElement>("#update-modal-detail");
-const updatePrimaryButton = document.querySelector<HTMLButtonElement>(
-  "#update-primary-button",
-);
-const updateSecondaryButton = document.querySelector<HTMLButtonElement>(
-  "#update-secondary-button",
-);
-const updateCloseButton = document.querySelector<HTMLButtonElement>(
-  "#update-modal-close",
-);
-const updateDevPanel = document.querySelector<HTMLElement>("#update-dev-panel");
 let pendingImport: { bytes: number[]; thumbnailDataUrl: string | null } | null = null;
 let currentAvatarId: string | null = null;
 let avatarLoaded = false;
 let avatarHasExpressionVariants = false;
 let tracking = false;
 let tuningProfile = createDefaultTuningProfile();
-let tuningProfileStoragePath: string | null = null;
-let tuningSaveTimer: number | null = null;
-let tuningWriteQueue = Promise.resolve();
+const tuningProfileStore = new TuningProfileStore(isRunningInTauri());
 let calibrationSession: CalibrationSession | null = null;
 let latestExpressionScores: ExpressionScores = zeroExpressionScores();
 let latestExpressionSignals: ExpressionSignals = zeroExpressionSignals();
@@ -491,12 +421,8 @@ let latestCameraMouthScore = 0;
 let latestCameraMouthSignal = false;
 let latestMicrophoneMouthScore = 0;
 let latestMicrophoneMouthSignal = false;
-let cleanOutputMode = false;
 let isolateMode = false;
-let currentCleanOutputAvatar: CleanOutputStoredAvatar | null = null;
-let cleanOutputBackgroundOverride: CleanOutputBackgroundPayload | null = null;
-let cleanOutputAvatarLoaded = false;
-let latestCleanOutputPose: CleanOutputPosePayload = {
+let currentAvatarPose: AvatarPose = {
   expressionIndex: FFLExpression.Normal,
   headRotation: { pitch: 0, yaw: 0, roll: 0 },
 };
@@ -523,12 +449,16 @@ let activeTourController: TourController | null = null;
 let activeTourPresenter: TourPresenter | null = null;
 let activeTourChapterId: TourChapterId | null = null;
 let errorSpeaker: ErrorSpeaker | null = null;
-let updateModalActive = false;
-let updateExperienceChecking = true;
 let rendererPrewarmFinished = false;
-let updatePrimaryAction: (() => void) | null = null;
-let updateSecondaryAction: (() => void) | null = null;
-let updateCloseAction: (() => void) | null = null;
+const updateExperience = createUpdateExperience({
+  isTauri: isRunningInTauri(),
+  devPanelEnabled: import.meta.env.DEV && searchParams.get("test-updates") === "1",
+  onModalOpen: endActiveTour,
+  onIdle: () => {
+    if (!rendererPrewarmFinished) return;
+    startTourIfNeeded(appShellEl?.classList.contains("mode-workspace") ? "workspace" : "library");
+  },
+});
 
 type CalibrationSession = {
   startedAt: number;
@@ -540,25 +470,9 @@ type LipSyncCalibrationSession = {
   rmsSamples: number[];
 };
 
-type CleanOutputStoredAvatar = {
-  name: string;
-  bytes: number[];
-};
-
-type CleanOutputBackgroundPayload = {
-  color: string;
-  transparent: boolean;
-};
-
-type CleanOutputPosePayload = {
+type AvatarPose = {
   expressionIndex: number;
   headRotation: HeadRotation;
-};
-
-type CleanOutputAvatarPayload = CleanOutputStoredAvatar & {
-  background: CleanOutputBackgroundPayload;
-  bodyVisible: boolean;
-  pose: CleanOutputPosePayload;
 };
 
 function setStatus(message: string, tone: "idle" | "error" | "success" = "idle") {
@@ -586,16 +500,6 @@ function setCalibrationStatus(
 
   calibrationStatusEl.textContent = message;
   calibrationStatusEl.dataset.tone = tone;
-}
-
-function setOutputStatus(
-  message: string,
-  tone: "idle" | "error" | "success" = "idle",
-) {
-  if (!outputStatusEl) return;
-
-  outputStatusEl.textContent = message;
-  outputStatusEl.dataset.tone = tone;
 }
 
 function setLipSyncStatus(
@@ -639,15 +543,6 @@ function setTrackingButtons() {
 function getTrackingFps() {
   const fps = Number(trackingFpsSelect?.value ?? "60");
   return Number.isFinite(fps) && fps > 0 ? fps : 60;
-}
-
-function setOutputButtons() {
-  if (toggleCleanOutputButton) {
-    toggleCleanOutputButton.disabled = !avatarLoaded;
-    toggleCleanOutputButton.textContent = cleanOutputMode
-      ? "Close OBS Clean View"
-      : "Open OBS Clean View";
-  }
 }
 
 function setLipSyncButtons(running = lipSyncContext !== null) {
@@ -698,38 +593,8 @@ function setLipSyncDebugValue(score: number) {
   if (debugLipSyncMouthEl) debugLipSyncMouthEl.textContent = score.toFixed(2);
 }
 
-function formatExpressionScores(scores: {
-  smile: number;
-  mouthOpen: number;
-  blinkLeft: number;
-  blinkRight: number;
-  anger: number;
-  sorrow: number;
-  surprise: number;
-}) {
-  return [
-    `smile ${formatScore(scores.smile)}`,
-    `mouth ${formatScore(scores.mouthOpen)}`,
-    `blink ${formatScore(Math.max(scores.blinkLeft, scores.blinkRight))}`,
-    `anger ${formatScore(scores.anger)}`,
-    `sad ${formatScore(scores.sorrow)}`,
-    `surprise ${formatScore(scores.surprise)}`,
-  ].join(", ");
-}
 
-function formatTopBlendshapes(blendshapes: BlendshapeCategory[]) {
-  const active = blendshapes
-    .filter(({ score }) => score >= 0.05)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 5)
-    .map(({ categoryName, score }) => `${categoryName} ${formatScore(score)}`);
 
-  return active.length > 0 ? active.join(", ") : "none";
-}
-
-function formatScore(score: number) {
-  return score.toFixed(2);
-}
 
 function renderBlendshapeBars(
   rawBlendshapes: BlendshapeCategory[],
@@ -782,18 +647,8 @@ function renderBlendshapeBars(
   debugBlendshapeBarsEl.replaceChildren(fragment);
 }
 
-function expressionLabel(expressionIndex: number) {
-  const label = FFL_EXPRESSION_LABELS[expressionIndex as FFLExpression];
-  return label ? `${expressionIndex} ${label}` : String(expressionIndex);
-}
 
-function formatChannels(channels: ExpressionChannels) {
-  return `eyes ${channels.eyes}, mouth ${channels.mouth}, emotion ${channels.emotion}`;
-}
 
-function clamp01(value: number) {
-  return Math.min(1, Math.max(0, value));
-}
 
 if (!viewerCanvas) {
   throw new Error("Missing #mii-viewer canvas");
@@ -809,358 +664,7 @@ const expressionPipeline = new ExpressionPipeline(tuningProfile);
 const avatarPoseCoordinator = new AvatarPoseCoordinator(expressionPipeline);
 
 window.addEventListener("resize", () => avatarScene.resize());
-if (isCleanOutputWindow) {
-  void initializeCleanOutputWindow();
-} else {
-  void initializeMainWindow();
-}
-
-async function initializeUpdateExperience() {
-  wireUpdateModalControls();
-  initializeUpdateDevControls();
-
-  // Browsers cannot use Tauri's signed updater. The opt-in development panel
-  // still works there, which makes every visual state easy to test with Vite.
-  if (!isRunningInTauri()) {
-    finishUpdateCheckWithoutModal();
-    return;
-  }
-
-  let installedVersion: string;
-  try {
-    installedVersion = await getVersion();
-  } catch (error) {
-    reportAppError("UPDATE_FAILED", error, { action: "read installed version" });
-    finishUpdateCheckWithoutModal();
-    return;
-  }
-  const previousVersion = localStorage.getItem(LAST_LAUNCHED_VERSION_KEY);
-  const legacyInstallDetected =
-    previousVersion === null &&
-    hasLegacyInstallData(localStorage, LEGACY_INSTALL_STORAGE_KEYS);
-  localStorage.setItem(LAST_LAUNCHED_VERSION_KEY, installedVersion);
-
-  try {
-    const update = await checkForUpdate({ timeout: 10_000 });
-    if (update) {
-      updateExperienceChecking = false;
-      showAvailableUpdate(update);
-      return;
-    }
-  } catch (error) {
-    // A background check failure should not interrupt startup. Download and
-    // installation failures are shown inside the modal after the user opts in.
-    reportAppError("UPDATE_FAILED", error, { action: "startup update check" });
-  }
-
-  updateExperienceChecking = false;
-  showWhatsNewIfNeeded(installedVersion, previousVersion, legacyInstallDetected);
-  if (!updateModalActive && rendererPrewarmFinished) startTourIfNeeded("library");
-}
-
-function finishUpdateCheckWithoutModal() {
-  updateExperienceChecking = false;
-  if (rendererPrewarmFinished) startTourIfNeeded("library");
-}
-
-function wireUpdateModalControls() {
-  updatePrimaryButton?.addEventListener("click", () => updatePrimaryAction?.());
-  updateSecondaryButton?.addEventListener("click", () => updateSecondaryAction?.());
-  updateCloseButton?.addEventListener("click", () => updateCloseAction?.());
-  updateModalImage?.addEventListener("error", () => {
-    updateModalImage.hidden = true;
-  });
-}
-
-function showAvailableUpdate(update: Update) {
-  resetUpdateModal();
-  setUpdateModalCopy(
-    "A New Update is Available!",
-    `MiiTuber ${update.version} is ready. Would you like to install it?`,
-  );
-  setUpdateModalButtons(
-    "Update Now",
-    () => void installAvailableUpdate(update),
-    "Update Later",
-    hideUpdateModal,
-  );
-  showUpdateModal();
-}
-
-async function installAvailableUpdate(update: Update) {
-  let downloadedBytes = 0;
-  let totalBytes: number | undefined;
-
-  showDownloadingUpdate();
-  try {
-    await update.downloadAndInstall((event) => {
-      if (event.event === "Started") {
-        downloadedBytes = 0;
-        totalBytes = event.data.contentLength;
-        updateDownloadProgress(downloadedBytes, totalBytes);
-      } else if (event.event === "Progress") {
-        downloadedBytes += event.data.chunkLength;
-        updateDownloadProgress(downloadedBytes, totalBytes);
-      } else if (event.event === "Finished") {
-        showInstallingUpdate();
-      }
-    });
-    showReadyToRestart(update.version);
-  } catch (error) {
-    reportAppError("UPDATE_FAILED", error, { action: "download and install" });
-    showUpdateError(update, friendlyUpdateError(error));
-  }
-}
-
-function showDownloadingUpdate(percent?: number) {
-  resetUpdateModal();
-  setUpdateModalCopy("Downloading Update", "You can keep this window open while MiiTuber gets ready.");
-  if (updateModalProgressWrap) updateModalProgressWrap.hidden = false;
-  if (updateModalProgressLabel) {
-    updateModalProgressLabel.textContent =
-      percent === undefined ? "Downloading…" : `Downloading… ${Math.round(percent)}%`;
-  }
-  if (updateModalProgress) {
-    if (percent === undefined) updateModalProgress.removeAttribute("value");
-    else updateModalProgress.value = percent;
-  }
-  setUpdateModalButtons(null, null, null, null);
-  showUpdateModal();
-}
-
-function updateDownloadProgress(downloadedBytes: number, totalBytes?: number) {
-  if (!updateModalProgress || !updateModalProgressLabel) return;
-  if (!totalBytes || totalBytes <= 0) {
-    updateModalProgress.removeAttribute("value");
-    updateModalProgressLabel.textContent = "Downloading…";
-    return;
-  }
-
-  const percent = Math.min(100, Math.round((downloadedBytes / totalBytes) * 100));
-  updateModalProgress.value = percent;
-  updateModalProgressLabel.textContent = `Downloading… ${percent}%`;
-}
-
-function showInstallingUpdate() {
-  resetUpdateModal();
-  setUpdateModalCopy("Installing Update", "Almost there. MiiTuber will be ready to restart shortly.");
-  if (updateModalProgressWrap) updateModalProgressWrap.hidden = false;
-  if (updateModalProgress) updateModalProgress.removeAttribute("value");
-  if (updateModalProgressLabel) updateModalProgressLabel.textContent = "Installing…";
-  setUpdateModalButtons(null, null, null, null);
-  showUpdateModal();
-}
-
-function showReadyToRestart(version: string) {
-  resetUpdateModal();
-  setUpdateModalCopy("Update Ready", `MiiTuber ${version} is installed and ready to restart.`);
-  setUpdateModalButtons(
-    "Restart Now",
-    () => void relaunch().catch((error) => {
-      reportAppError("UPDATE_FAILED", error, { action: "relaunch" });
-      if (updateModalDetail) {
-        updateModalDetail.textContent = "MiiTuber could not restart automatically. Close and reopen the app to finish.";
-        updateModalDetail.hidden = false;
-      }
-    }),
-    "Restart Later",
-    hideUpdateModal,
-  );
-  showUpdateModal();
-}
-
-function showUpdateError(update: Update | null, message: string) {
-  resetUpdateModal();
-  setUpdateModalCopy("Update Paused", "MiiTuber could not finish the update.");
-  if (updateModalDetail) {
-    updateModalDetail.textContent = message;
-    updateModalDetail.hidden = false;
-  }
-  setUpdateModalButtons(
-    update ? "Try Again" : null,
-    update ? () => void installAvailableUpdate(update) : null,
-    "Update Later",
-    hideUpdateModal,
-  );
-  showUpdateModal();
-}
-
-function friendlyUpdateError(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
-  if (/network|fetch|connect|offline|timed? ?out/i.test(text)) {
-    return "Check your internet connection, then try again.";
-  }
-  if (/permission|denied|access/i.test(text)) {
-    return "MiiTuber needs permission to replace the installed app. Try closing other MiiTuber windows first.";
-  }
-  return "Nothing was changed. You can try again now or update later.";
-}
-
-function showWhatsNewIfNeeded(
-  installedVersion: string,
-  previousVersion: string | null,
-  legacyInstallDetected = false,
-) {
-  const lastSeenVersion = localStorage.getItem(LAST_SEEN_RELEASE_NOTES_KEY);
-  if (!shouldShowReleaseNotes(
-    installedVersion,
-    previousVersion,
-    lastSeenVersion,
-    legacyInstallDetected,
-  )) {
-    return;
-  }
-  showWhatsNew(installedVersion, true);
-}
-
-function showWhatsNew(version: string, rememberOnDismiss: boolean) {
-  const release = releaseNotesForVersion(version);
-  if (!release) return;
-
-  resetUpdateModal();
-  if (updateCard) updateCard.dataset.kind = "whats-new";
-  setUpdateModalImage(release.imageUrl);
-  setUpdateModalCopy(release.title, "");
-  if (updateModalMessage) updateModalMessage.hidden = true;
-  if (updateModalNotes) {
-    updateModalNotes.replaceChildren(
-      ...release.items.map((item) => {
-        const listItem = document.createElement("li");
-        listItem.textContent = item;
-        return listItem;
-      }),
-    );
-    updateModalNotes.hidden = false;
-  }
-  if (updateModalFooterNote) {
-    updateModalFooterNote.textContent = release.footer ?? "";
-    updateModalFooterNote.hidden = !release.footer;
-  }
-  setUpdateModalButtons(null, null, null, null);
-  updateCloseAction = () => {
-    if (rememberOnDismiss) {
-      localStorage.setItem(LAST_SEEN_RELEASE_NOTES_KEY, version);
-    }
-    hideUpdateModal();
-  };
-  if (updateCloseButton) updateCloseButton.hidden = false;
-  showUpdateModal();
-}
-
-function setUpdateModalCopy(title: string, message: string) {
-  if (updateModalTitle) updateModalTitle.textContent = title;
-  if (updateModalMessage) updateModalMessage.textContent = message;
-}
-
-function setUpdateModalImage(imageUrl: string) {
-  if (updateModalImage) {
-    updateModalImage.hidden = false;
-    updateModalImage.src = imageUrl;
-  }
-}
-
-function hideUpdateModalImage() {
-  if (updateModalImage) updateModalImage.hidden = true;
-}
-
-function setUpdateModalButtons(
-  primaryLabel: string | null,
-  primaryAction: (() => void) | null,
-  secondaryLabel: string | null,
-  secondaryAction: (() => void) | null,
-) {
-  updatePrimaryAction = primaryAction;
-  updateSecondaryAction = secondaryAction;
-  if (updatePrimaryButton) {
-    updatePrimaryButton.hidden = primaryLabel === null;
-    updatePrimaryButton.disabled = primaryAction === null;
-    if (primaryLabel) updatePrimaryButton.textContent = primaryLabel;
-  }
-  if (updateSecondaryButton) {
-    updateSecondaryButton.hidden = secondaryLabel === null;
-    updateSecondaryButton.disabled = secondaryAction === null;
-    if (secondaryLabel) updateSecondaryButton.textContent = secondaryLabel;
-  }
-}
-
-function resetUpdateModal() {
-  if (updateCard) updateCard.dataset.kind = "update";
-  hideUpdateModalImage();
-  updateCloseAction = null;
-  if (updateCloseButton) updateCloseButton.hidden = true;
-  if (updateModalMessage) updateModalMessage.hidden = false;
-  if (updateModalNotes) {
-    updateModalNotes.hidden = true;
-    updateModalNotes.replaceChildren();
-  }
-  if (updateModalFooterNote) {
-    updateModalFooterNote.hidden = true;
-    updateModalFooterNote.textContent = "";
-  }
-  if (updateModalProgressWrap) updateModalProgressWrap.hidden = true;
-  if (updateModalDetail) {
-    updateModalDetail.hidden = true;
-    updateModalDetail.textContent = "";
-  }
-  setUpdateModalButtons(null, null, null, null);
-}
-
-function showUpdateModal() {
-  if (!updateModal) return;
-  endActiveTour();
-  updateModalActive = true;
-  updateModal.hidden = false;
-  window.setTimeout(() => {
-    const target = !updatePrimaryButton?.hidden
-      ? updatePrimaryButton
-      : updateSecondaryButton;
-    target?.focus();
-  }, 0);
-}
-
-function hideUpdateModal() {
-  if (updateModal) updateModal.hidden = true;
-  updateModalActive = false;
-  updatePrimaryAction = null;
-  updateSecondaryAction = null;
-  updateCloseAction = null;
-  if (rendererPrewarmFinished) {
-    startTourIfNeeded(appShellEl?.classList.contains("mode-workspace") ? "workspace" : "library");
-  }
-}
-
-function initializeUpdateDevControls() {
-  if (!import.meta.env.DEV || searchParams.get("test-updates") !== "1") {
-    updateDevPanel?.remove();
-    return;
-  }
-  if (updateDevPanel) updateDevPanel.hidden = false;
-  updateDevPanel?.addEventListener("click", (event) => {
-    const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
-      "button[data-update-test]",
-    );
-    const state = button?.dataset.updateTest;
-    if (!state) return;
-    if (state === "available") showTestAvailableUpdate();
-    if (state === "downloading") showDownloadingUpdate(35);
-    if (state === "installing") showInstallingUpdate();
-    if (state === "ready") showReadyToRestart("0.2.2");
-    if (state === "error") showUpdateError(null, "Test error: nothing was changed.");
-    if (state === "whats-new") showWhatsNewIfNeeded("0.2.2", "0.2.1");
-    if (state === "clear-seen") {
-      localStorage.removeItem(LAST_SEEN_RELEASE_NOTES_KEY);
-      button.textContent = "Cleared!";
-      window.setTimeout(() => { button.textContent = "Clear seen version"; }, 900);
-    }
-  });
-}
-
-function showTestAvailableUpdate() {
-  resetUpdateModal();
-  setUpdateModalCopy("A New Update is Available!", "MiiTuber 0.2.2 is ready. Would you like to install it?");
-  setUpdateModalButtons("Update Now", () => showDownloadingUpdate(0), "Update Later", hideUpdateModal);
-  showUpdateModal();
-}
+void initializeMainWindow();
 
 async function initializeMainWindow() {
   await initializeTuningProfilePersistence();
@@ -1172,7 +676,6 @@ async function initializeMainWindow() {
   initializeDebugInfoToggle();
   resetAvatarTrackingState();
   setTrackingButtons();
-  setOutputButtons();
   setLipSyncButtons();
   setLipSyncDebugValue(0);
   setAppMode("library");
@@ -1183,7 +686,7 @@ async function initializeMainWindow() {
     void refreshCameraList();
   });
   void refreshCameraList();
-  void initializeUpdateExperience();
+  void updateExperience.start();
   void refreshMicrophoneList();
   // Warm the renderer first: on first run this raises the blocking resource
   // gate. The library tour starts only after the resource is present, keeping
@@ -1192,200 +695,6 @@ async function initializeMainWindow() {
     rendererPrewarmFinished = true;
     startTourIfNeeded("library");
   });
-  if (isRunningInTauri()) {
-    void listen(CLEAN_OUTPUT_READY_EVENT, () => {
-      void publishCleanOutputAvatarSnapshot();
-    });
-    void listen(CLEAN_OUTPUT_HIDDEN_EVENT, () => {
-      cleanOutputMode = false;
-      setOutputButtons();
-      setOutputStatus("OBS Clean View closed.", "idle");
-    });
-    void WebviewWindow.getCurrent().onCloseRequested(async () => {
-      const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
-      await cleanWindow?.destroy();
-    });
-  }
-}
-
-async function initializeCleanOutputWindow() {
-  cleanOutputMode = true;
-  setAppMode("workspace");
-  document.documentElement.classList.add("clean-output-mode", "clean-output-window");
-  document.body.classList.add("clean-output-mode", "clean-output-window");
-  if (emptyPreviewEl) emptyPreviewEl.hidden = true;
-
-  await WebviewWindow.getCurrent().onCloseRequested((event) => {
-    event.preventDefault();
-    void hideCurrentCleanOutputWindow();
-  });
-
-  await listen<CleanOutputAvatarPayload>(CLEAN_OUTPUT_AVATAR_EVENT, (event) => {
-    void loadCleanOutputAvatar(event.payload);
-  });
-  await listen<CleanOutputBackgroundPayload>(
-    CLEAN_OUTPUT_BACKGROUND_EVENT,
-    (event) => {
-      applyCleanOutputBackground(event.payload);
-    },
-  );
-  await listen<boolean>(CLEAN_OUTPUT_BODY_VISIBILITY_EVENT, (event) => {
-    avatarScene.setBodyVisible(event.payload);
-  });
-  await listen<CleanOutputPosePayload>(CLEAN_OUTPUT_POSE_EVENT, (event) => {
-    applyCleanOutputPose(event.payload);
-  });
-
-  applyCleanOutputBackground({ color: "#e8f0f7", transparent: true });
-  setStatus("Waiting for the main window to send an avatar...", "idle");
-  await emit(CLEAN_OUTPUT_READY_EVENT);
-  window.setTimeout(() => {
-    if (cleanOutputAvatarLoaded) return;
-
-    const storedAvatar = readCleanOutputAvatar();
-    if (!storedAvatar) return;
-
-    void loadCleanOutputAvatar({
-      ...storedAvatar,
-      background: { color: "#e8f0f7", transparent: true },
-      bodyVisible: readBodyVisiblePreference(),
-      pose: latestCleanOutputPose,
-    });
-  }, 300);
-}
-
-async function openCleanOutputWindow() {
-  if (!avatarLoaded) {
-    setOutputStatus("Render an avatar before opening OBS Clean View.", "error");
-    return;
-  }
-
-  try {
-    const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
-    if (!cleanWindow) {
-      throw new Error(
-        "The configured clean-output window was not found. Restart the Tauri app so the window from tauri.conf.json is created.",
-      );
-    }
-
-    cleanOutputMode = true;
-    setOutputButtons();
-    await cleanWindow.show();
-    await cleanWindow.setFocus();
-    await publishCleanOutputAvatarSnapshot();
-    setOutputStatus(
-      "OBS Clean View is open in its own renderer window.",
-      "success",
-    );
-  } catch (error) {
-    cleanOutputMode = false;
-    setOutputButtons();
-    setOutputStatus(userFacingError("CLEAN_VIEW_FAILED", error, { action: "open" }), "error");
-  }
-}
-
-async function closeCleanOutputWindow() {
-  try {
-    const cleanWindow = await WebviewWindow.getByLabel(CLEAN_OUTPUT_WINDOW_LABEL);
-    await cleanWindow?.hide();
-  } catch (error) {
-    setOutputStatus(userFacingError("CLEAN_VIEW_FAILED", error, { action: "close" }), "error");
-    return;
-  }
-
-  cleanOutputMode = false;
-  setOutputButtons();
-  setOutputStatus("OBS Clean View closed.", "idle");
-}
-
-async function hideCurrentCleanOutputWindow() {
-  try {
-    await WebviewWindow.getCurrent().hide();
-    await emit(CLEAN_OUTPUT_HIDDEN_EVENT);
-  } catch (error) {
-    reportAppError("CLEAN_VIEW_FAILED", error, { action: "hide" });
-  }
-}
-
-async function publishCleanOutputAvatarSnapshot() {
-  if (isCleanOutputWindow) return;
-  if (!cleanOutputMode) return;
-
-  const avatar = currentCleanOutputAvatar ?? readCleanOutputAvatar();
-  if (!avatar) return;
-
-  await emitTo<CleanOutputAvatarPayload>(
-    CLEAN_OUTPUT_WINDOW_LABEL,
-    CLEAN_OUTPUT_AVATAR_EVENT,
-    {
-      ...avatar,
-      background: readCurrentBackground(),
-      bodyVisible: readBodyVisiblePreference(),
-      pose: latestCleanOutputPose,
-    },
-  );
-}
-
-function publishCleanOutputBackground() {
-  if (isCleanOutputWindow) return;
-  if (!cleanOutputMode) return;
-
-  void emitTo<CleanOutputBackgroundPayload>(
-    CLEAN_OUTPUT_WINDOW_LABEL,
-    CLEAN_OUTPUT_BACKGROUND_EVENT,
-    readCurrentBackground(),
-  );
-}
-
-function publishCleanOutputBodyVisibility(visible: boolean) {
-  if (isCleanOutputWindow) return;
-  if (!cleanOutputMode) return;
-
-  void emitTo<boolean>(
-    CLEAN_OUTPUT_WINDOW_LABEL,
-    CLEAN_OUTPUT_BODY_VISIBILITY_EVENT,
-    visible,
-  );
-}
-
-function publishCleanOutputPose() {
-  if (isCleanOutputWindow) return;
-  if (!cleanOutputMode) return;
-
-  void emitTo<CleanOutputPosePayload>(
-    CLEAN_OUTPUT_WINDOW_LABEL,
-    CLEAN_OUTPUT_POSE_EVENT,
-    latestCleanOutputPose,
-  );
-}
-
-async function loadCleanOutputAvatar(payload: CleanOutputAvatarPayload) {
-  try {
-    cleanOutputAvatarLoaded = true;
-    applyCleanOutputBackground(payload.background);
-    avatarScene.setBodyVisible(payload.bodyVisible);
-    const ffl = await getFflContext();
-    await avatarScene.loadModelFromMiiBytes(
-      normalizeMiiBytes(new Uint8Array(payload.bytes)),
-      ffl,
-    );
-    applyCleanOutputPose(payload.pose);
-    if (emptyPreviewEl) emptyPreviewEl.hidden = true;
-    setStatus(`OBS Clean View rendering ${payload.name}.`, "success");
-  } catch (error) {
-    setStatus(userFacingError("AVATAR_RENDER_FAILED", error, { view: "clean output" }), "error");
-  }
-}
-
-function applyCleanOutputBackground(background: CleanOutputBackgroundPayload) {
-  cleanOutputBackgroundOverride = background;
-  updateAvatarBackground();
-}
-
-function applyCleanOutputPose(pose: CleanOutputPosePayload) {
-  latestCleanOutputPose = pose;
-  avatarScene.setExpression(pose.expressionIndex);
-  avatarScene.setHeadRotation(pose.headRotation);
 }
 
 function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
@@ -1393,10 +702,9 @@ function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
   const displayedExpressionIndex = autoBlinkClosed
     ? withBlink(expressionIndex)
     : expressionIndex;
-  latestCleanOutputPose = { expressionIndex: displayedExpressionIndex, headRotation };
+  currentAvatarPose = { expressionIndex: displayedExpressionIndex, headRotation };
   avatarScene.setExpression(displayedExpressionIndex);
   avatarScene.setHeadRotation(headRotation);
-  publishCleanOutputPose();
 }
 
 function applyExpressionPose(expressionIndex: number, headRotation: HeadRotation) {
@@ -1409,50 +717,11 @@ function syncExpressionSelect(expressionIndex: number) {
   if (expressionSelect) expressionSelect.value = String(expressionIndex);
 }
 
-function readCurrentBackground(): CleanOutputBackgroundPayload {
-  if (cleanOutputBackgroundOverride) return cleanOutputBackgroundOverride;
-
+function readCurrentBackground(): AvatarBackground {
   return {
     color: backgroundColorInput?.value ?? "#e8f0f7",
     transparent: isolateMode || (transparentBackgroundInput?.checked ?? false),
   };
-}
-
-function readCleanOutputAvatar(): CleanOutputStoredAvatar | null {
-  try {
-    const raw = localStorage.getItem(CLEAN_OUTPUT_AVATAR_STORAGE_KEY);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw) as Partial<CleanOutputStoredAvatar>;
-    if (typeof parsed.name !== "string" || !Array.isArray(parsed.bytes)) {
-      return null;
-    }
-    if (
-      parsed.bytes.length === 0 ||
-      !parsed.bytes.every(
-        (value) => Number.isInteger(value) && value >= 0 && value <= 255,
-      )
-    ) {
-      return null;
-    }
-
-    return {
-      name: parsed.name,
-      bytes: parsed.bytes,
-    };
-  } catch (error) {
-    console.warn("[MiiTuber] could not read OBS clean avatar", { error });
-    return null;
-  }
-}
-
-function saveCleanOutputAvatar(avatar: CleanOutputStoredAvatar) {
-  currentCleanOutputAvatar = avatar;
-  try {
-    localStorage.setItem(CLEAN_OUTPUT_AVATAR_STORAGE_KEY, JSON.stringify(avatar));
-  } catch (error) {
-    console.warn("[MiiTuber] could not save OBS clean avatar", { error });
-  }
 }
 
 function populateExpressionSelect() {
@@ -1550,21 +819,13 @@ async function refreshMicrophoneList() {
 
 expressionSelect?.addEventListener("change", () => {
   const expressionIndex = Number(expressionSelect.value);
-  const resolvedExpressionIndex = applyExpressionPose(
-    expressionIndex,
-    latestCleanOutputPose.headRotation,
-  );
+  applyExpressionPose(expressionIndex, currentAvatarPose.headRotation);
   logRenderEvent("manual expression selected", { expressionIndex });
-  if (resolvedExpressionIndex !== expressionIndex) {
-    logRenderEvent("manual expression ignored while override is active", {
-      override: resolvedExpressionIndex,
-    });
-  }
 });
 
 autoBlinkInput?.addEventListener("change", () => {
   const enabled = autoBlinkInput.checked;
-  writeAutoBlinkPreference(enabled);
+  writeBooleanPreference(AUTO_BLINK_STORAGE_KEY, enabled);
   expressionPipeline.setSuppressBriefBlinks(enabled);
   tickAutoBlink();
   logRenderEvent("auto blink toggled", { enabled });
@@ -1573,8 +834,7 @@ autoBlinkInput?.addEventListener("change", () => {
 bodyVisibleInput?.addEventListener("change", () => {
   const visible = bodyVisibleInput.checked;
   avatarScene.setBodyVisible(visible);
-  writeBodyVisiblePreference(visible);
-  publishCleanOutputBodyVisibility(visible);
+  writeBooleanPreference(BODY_VISIBLE_STORAGE_KEY, visible);
   logRenderEvent("body visibility toggled", { visible });
 });
 
@@ -1592,28 +852,13 @@ backgroundColorInput?.addEventListener("input", () => {
   });
 });
 
-toggleCleanOutputButton?.addEventListener("click", () => {
-  setCleanOutputMode(!cleanOutputMode);
-});
-
 isolateCaptureButton?.addEventListener("click", () => {
   setIsolateMode(true);
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape") return;
-
-  if (isolateMode && !isCleanOutputWindow) {
+  if (event.key === "Escape" && isolateMode) {
     setIsolateMode(false);
-    return;
-  }
-
-  if (cleanOutputMode) {
-    if (isCleanOutputWindow) {
-      void hideCurrentCleanOutputWindow();
-      return;
-    }
-    setCleanOutputMode(false);
   }
 });
 
@@ -1668,26 +913,8 @@ resetProfileButton?.addEventListener("click", () => {
 });
 
 async function initializeTuningProfilePersistence() {
-  if (!isRunningInTauri()) {
-    if (tuningStorageNoteEl) {
-      tuningStorageNoteEl.textContent =
-        "Changes are saved automatically in this browser.";
-    }
-    try {
-      const savedProfile = localStorage.getItem(TUNING_PROFILE_STORAGE_KEY);
-      if (savedProfile) {
-        applyTuningProfile(parseTuningProfileJson(savedProfile), { persist: false });
-      }
-    } catch (error) {
-      setCalibrationStatus(userFacingError("TUNING_IMPORT_INVALID", error, {
-        action: "load browser working copy",
-      }), "error");
-    }
-    return;
-  }
-
   try {
-    tuningProfileStoragePath = await join(await appDataDir(), TUNING_PROFILE_FILE_NAME);
+    await tuningProfileStore.open();
   } catch (error) {
     setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
       action: "open automatic storage",
@@ -1695,105 +922,55 @@ async function initializeTuningProfilePersistence() {
     return;
   }
   if (tuningStorageNoteEl) {
-    tuningStorageNoteEl.textContent = "Changes are saved automatically inside MiiTuber.";
-    tuningStorageNoteEl.title = "MiiTuber keeps a private working copy in its app data.";
-  }
-
-  let bytes: Uint8Array;
-  try {
-    bytes = await readFile(tuningProfileStoragePath);
-  } catch (error) {
-    // A missing file is the normal first-run case; defaults remain active.
-    console.info("[MiiTuber] no saved app-data tuning profile found", { error });
-    return;
+    if (tuningProfileStore.isTauri) {
+      tuningStorageNoteEl.textContent = "Changes are saved automatically inside MiiTuber.";
+      tuningStorageNoteEl.title = "MiiTuber keeps a private working copy in its app data.";
+    } else {
+      tuningStorageNoteEl.textContent = "Changes are saved automatically in this browser.";
+    }
   }
 
   try {
-    const savedProfile = new TextDecoder().decode(bytes);
-    applyTuningProfile(parseTuningProfileJson(savedProfile), { persist: false });
-    console.info("[MiiTuber] loaded tuning profile from app data");
+    const savedProfile = await tuningProfileStore.readWorkingCopy();
+    if (savedProfile) {
+      applyTuningProfile(parseTuningProfileJson(savedProfile), { persist: false });
+    }
   } catch (error) {
     setCalibrationStatus(userFacingError("TUNING_IMPORT_INVALID", error, {
-      action: "load automatic working copy",
+      action: tuningProfileStore.isTauri
+        ? "load automatic working copy"
+        : "load browser working copy",
     }), "error");
   }
 }
 
 function scheduleTuningProfileSave() {
-  if (tuningSaveTimer !== null) window.clearTimeout(tuningSaveTimer);
-  tuningSaveTimer = window.setTimeout(() => {
-    tuningSaveTimer = null;
-    const json = serializeTuningProfile(tuningProfile);
-    tuningWriteQueue = tuningWriteQueue
-      .then(() => persistTuningProfile(json))
-      .catch((error) => {
-        setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
-          action: "automatic save",
-        }), "error");
-      });
-  }, TUNING_SAVE_DEBOUNCE_MS);
-}
-
-async function persistTuningProfile(json: string) {
-  if (!isRunningInTauri()) {
-    localStorage.setItem(TUNING_PROFILE_STORAGE_KEY, json);
-  } else {
-    const appDataPath = await appDataDir();
-    await mkdir(appDataPath, { recursive: true });
-    tuningProfileStoragePath ??= await join(appDataPath, TUNING_PROFILE_FILE_NAME);
-    await writeFile(tuningProfileStoragePath, new TextEncoder().encode(json));
-  }
-
+  tuningProfileStore.scheduleSave(
+    () => serializeTuningProfile(tuningProfile),
+    (error) => {
+      setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
+        action: "automatic save",
+      }), "error");
+    },
+  );
 }
 
 saveProfileButton?.addEventListener("click", async () => {
-  const json = serializeTuningProfile(tuningProfile);
-  if (isRunningInTauri()) {
-    try {
-      const path = await saveDialog({
-        title: "Save tuning profile",
-        defaultPath: TUNING_PROFILE_FILE_NAME,
-        filters: [{ name: "JSON profile", extensions: ["json"] }],
-      });
-      if (!path) return;
-      await writeFile(path, new TextEncoder().encode(json));
+  try {
+    if (await tuningProfileStore.saveCopy(serializeTuningProfile(tuningProfile))) {
       setCalibrationStatus("Saved a copy of your tuning profile.", "success");
-    } catch (error) {
-      setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
-        action: "save copy",
-      }), "error");
     }
-    return;
+  } catch (error) {
+    setCalibrationStatus(userFacingError("TUNING_SAVE_FAILED", error, {
+      action: "save copy",
+    }), "error");
   }
-
-  const url = URL.createObjectURL(
-    new Blob([json], { type: "application/json;charset=utf-8" }),
-  );
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "miituber-tuning-profile.json";
-  link.click();
-  URL.revokeObjectURL(url);
-  setCalibrationStatus("Saved a copy of your tuning profile.", "success");
 });
 
 loadProfileButton?.addEventListener("click", async () => {
   try {
-    let profileJson: string | null = null;
-    if (isRunningInTauri()) {
-      const selected = await openDialog({
-        title: "Import tuning profile",
-        multiple: false,
-        directory: false,
-        filters: [{ name: "JSON profile", extensions: ["json"] }],
-      });
-      if (typeof selected !== "string") return;
-      profileJson = new TextDecoder().decode(await readFile(selected));
-    } else {
-      const file = await chooseBrowserJsonFile();
-      if (!file) return;
-      profileJson = await file.text();
-    }
+    const profileJson = await tuningProfileStore.importCopy();
+    if (profileJson === null) return;
 
     applyTuningProfile(parseTuningProfileJson(profileJson));
     setCalibrationStatus("Imported your tuning profile.", "success");
@@ -1803,18 +980,6 @@ loadProfileButton?.addEventListener("click", async () => {
     }), "error");
   }
 });
-
-function chooseBrowserJsonFile(): Promise<File | null> {
-  return new Promise((resolve) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "application/json,.json";
-    input.addEventListener("change", () => resolve(input.files?.[0] ?? null), {
-      once: true,
-    });
-    input.click();
-  });
-}
 
 function populateTuningControls() {
   if (signalTuningControlsEl) {
@@ -1835,7 +1000,7 @@ function populateTuningControls() {
   });
   showDebugInfoInput?.addEventListener("change", () => {
     setDebugInfoVisible(showDebugInfoInput.checked);
-    writeShowDebugInfoPreference(showDebugInfoInput.checked);
+    writeBooleanPreference(SHOW_DEBUG_INFO_STORAGE_KEY, showDebugInfoInput.checked);
   });
   minimumHoldMsInput?.addEventListener("change", () => {
     tuningProfile.minimumHoldMs = nonNegativeInputValue(
@@ -2065,7 +1230,7 @@ function easeHeadTowardNeutral(now: number) {
     return;
   }
 
-  const { headRotation } = latestCleanOutputPose;
+  const { headRotation } = currentAvatarPose;
   const { pitch, yaw, roll } = headRotation;
   if (Math.max(Math.abs(pitch), Math.abs(yaw), Math.abs(roll)) < 0.1) return;
 
@@ -2131,7 +1296,7 @@ function applyCoordinatedAvatarPose(
   // the expression and must not snap the head back to an old camera matrix.
   const headRotation =
     updateSource === "microphone" && !avatarPoseCoordinator.isFaceDetected()
-      ? latestCleanOutputPose.headRotation
+      ? currentAvatarPose.headRotation
       : pipelineFrame.headRotation;
   const expressionIndex = applyExpressionPose(
     pipelineFrame.expressionIndex,
@@ -2369,26 +1534,6 @@ function stopTracking(message?: string) {
   }
 }
 
-function setCleanOutputMode(enabled: boolean) {
-  if (isCleanOutputWindow) {
-    cleanOutputMode = enabled;
-    document.documentElement.classList.toggle("clean-output-mode", enabled);
-    document.body.classList.toggle("clean-output-mode", enabled);
-    updateAvatarBackground();
-    requestAnimationFrame(() => {
-      avatarScene.resize();
-    });
-    return;
-  }
-
-  if (enabled) {
-    void openCleanOutputWindow();
-  } else {
-    void closeCleanOutputWindow();
-  }
-  logRenderEvent("OBS clean output popup toggled", { enabled });
-}
-
 function setIsolateMode(enabled: boolean) {
   isolateMode = enabled;
   document.documentElement.classList.toggle("capture-isolate", enabled);
@@ -2425,32 +1570,13 @@ function setIsolateMode(enabled: boolean) {
 }
 
 function updateAvatarBackground() {
-  const background = readCurrentBackground();
-  const { color, transparent } = background;
-
-  if (isCleanOutputWindow) {
-    const outputColor = transparent ? "transparent" : color;
-    avatarScene.setBackground({ color, transparent });
-    document.documentElement.classList.toggle("transparent-output", transparent);
-    document.body.classList.toggle("transparent-output", transparent);
-    document.documentElement.style.setProperty("--avatar-background", outputColor);
-    document.documentElement.style.backgroundColor = outputColor;
-    document.body.style.backgroundColor = outputColor;
-    canvas.style.backgroundColor = outputColor;
-    return;
-  }
-
-  // In the workspace, "transparent" shows an alpha checkerboard behind the
-  // canvas (a preview) instead of making the whole window see-through — the
-  // latter blanked the entire view. Real OBS transparency still comes from the
-  // capture-isolate / clean-output paths.
+  const { color, transparent } = readCurrentBackground();
   avatarScene.setBackground({ color, transparent });
   previewFrameEl?.classList.toggle("transparent-preview", transparent);
   document.documentElement.style.setProperty("--avatar-background", color);
   document.documentElement.style.backgroundColor = "";
   document.body.style.backgroundColor = "";
   canvas.style.backgroundColor = "";
-  publishCleanOutputBackground();
 }
 
 function resetAvatarTrackingState() {
@@ -2548,48 +1674,10 @@ function nonNegativeInputValue(input: HTMLInputElement, fallback: number) {
   return input.valueAsNumber >= 0 ? input.valueAsNumber : fallback;
 }
 
-function oneEuroParamsFromSmoothing(percent: number): TuningProfile["oneEuro"] {
-  const t = clampNumber(percent, 0, 100) / 100;
-  return {
-    minCutoff: roundTo(4 - 8.25 * t + 4.5 * t * t, 3),
-    beta: roundTo(0.08 - 0.165 * t + 0.09 * t * t, 4),
-    derivativeCutoff: roundTo(3 - 5.4 * t + 2.8 * t * t, 3),
-  };
-}
 
-function smoothingFromOneEuroParams(params: TuningProfile["oneEuro"]) {
-  let bestPercent = 50;
-  let bestDistance = Number.POSITIVE_INFINITY;
 
-  for (let percent = 0; percent <= 100; percent += 1) {
-    const candidate = oneEuroParamsFromSmoothing(percent);
-    const distance =
-      normalizedDistance(params.minCutoff, candidate.minCutoff, 4) +
-      normalizedDistance(params.beta, candidate.beta, 0.08) +
-      normalizedDistance(params.derivativeCutoff, candidate.derivativeCutoff, 3);
 
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestPercent = percent;
-    }
-  }
 
-  return bestPercent;
-}
-
-function normalizedDistance(a: number, b: number, scale: number) {
-  return Math.abs(a - b) / scale;
-}
-
-function roundTo(value: number, digits: number) {
-  const scale = 10 ** digits;
-  return Math.round(value * scale) / scale;
-}
-
-function clampNumber(value: number, min: number, max: number) {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, value));
-}
 
 function getLibraryStorage() {
   return window.localStorage;
@@ -2599,89 +1687,20 @@ function getTourStorage() {
   return window.localStorage;
 }
 
-function readBodyVisiblePreference() {
-  try {
-    const raw = localStorage.getItem(BODY_VISIBLE_STORAGE_KEY);
-    if (raw === null) return true;
 
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === "boolean" ? parsed : true;
-  } catch (error) {
-    console.warn("[MiiTuber] could not read body visibility preference", {
-      error,
-    });
-    return true;
-  }
-}
 
-function readShowDebugInfoPreference() {
-  try {
-    const raw = localStorage.getItem(SHOW_DEBUG_INFO_STORAGE_KEY);
-    if (raw === null) return false;
 
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === "boolean" ? parsed : false;
-  } catch (error) {
-    console.warn("[MiiTuber] could not read debug info preference", {
-      error,
-    });
-    return false;
-  }
-}
-
-function writeBodyVisiblePreference(visible: boolean) {
-  try {
-    localStorage.setItem(BODY_VISIBLE_STORAGE_KEY, JSON.stringify(visible));
-  } catch (error) {
-    console.warn("[MiiTuber] could not save body visibility preference", {
-      error,
-    });
-  }
-}
-
-function writeShowDebugInfoPreference(visible: boolean) {
-  try {
-    localStorage.setItem(SHOW_DEBUG_INFO_STORAGE_KEY, JSON.stringify(visible));
-  } catch (error) {
-    console.warn("[MiiTuber] could not save debug info preference", {
-      error,
-      visible,
-    });
-  }
-}
 
 function initializeBodyVisibleToggle() {
-  const visible = readBodyVisiblePreference();
+  const visible = readBooleanPreference(BODY_VISIBLE_STORAGE_KEY, true);
   if (bodyVisibleInput) bodyVisibleInput.checked = visible;
   avatarScene.setBodyVisible(visible);
 }
 
-function readAutoBlinkPreference() {
-  try {
-    const raw = localStorage.getItem(AUTO_BLINK_STORAGE_KEY);
-    if (raw === null) return true;
 
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === "boolean" ? parsed : true;
-  } catch (error) {
-    console.warn("[MiiTuber] could not read auto blink preference", { error });
-    return true;
-  }
-}
-
-function writeAutoBlinkPreference(enabled: boolean) {
-  try {
-    localStorage.setItem(AUTO_BLINK_STORAGE_KEY, JSON.stringify(enabled));
-  } catch (error) {
-    console.warn("[MiiTuber] could not save auto blink preference", {
-      error,
-      enabled,
-    });
-  }
-}
 
 function initializeAutoBlink() {
-  const enabled = readAutoBlinkPreference();
+  const enabled = readBooleanPreference(AUTO_BLINK_STORAGE_KEY, true);
   if (autoBlinkInput) autoBlinkInput.checked = enabled;
   expressionPipeline.setSuppressBriefBlinks(enabled);
   window.setInterval(tickAutoBlink, AUTO_BLINK_TICK_MS);
@@ -2694,11 +1713,11 @@ function tickAutoBlink() {
   if (closed === autoBlinkClosed) return;
 
   autoBlinkClosed = closed;
-  setAvatarPose(baseExpressionIndex, latestCleanOutputPose.headRotation);
+  setAvatarPose(baseExpressionIndex, currentAvatarPose.headRotation);
 }
 
 function initializeDebugInfoToggle() {
-  setDebugInfoVisible(readShowDebugInfoPreference());
+  setDebugInfoVisible(readBooleanPreference(SHOW_DEBUG_INFO_STORAGE_KEY, false));
 }
 
 function setDebugInfoVisible(visible: boolean) {
@@ -2719,9 +1738,7 @@ function replayCurrentTour() {
 
 function startTourIfNeeded(chapterId: TourChapterId) {
   if (
-    isCleanOutputWindow ||
-    updateExperienceChecking ||
-    updateModalActive ||
+    updateExperience.isBlocking() ||
     activeTourChapterId === chapterId
   ) return;
 
@@ -2732,7 +1749,7 @@ function startTourIfNeeded(chapterId: TourChapterId) {
 }
 
 function startTour(chapterId: TourChapterId) {
-  if (isCleanOutputWindow || !tourRootEl) return;
+  if (!tourRootEl) return;
 
   endActiveTour();
   errorSpeaker?.dismiss();
@@ -2765,17 +1782,12 @@ function startTour(chapterId: TourChapterId) {
   presenter.start();
 }
 
-/**
- * Speaks an error through the Mii dialogue bubble. Additive to the status
- * toasts — never their replacement — and silently skipped while a tour owns
- * the overlay or in the OBS clean-output window.
- */
 function speakError(line: MiiErrorLine) {
   getErrorSpeaker()?.speak(line);
 }
 
 function getErrorSpeaker(): ErrorSpeaker | null {
-  if (isCleanOutputWindow || !tourRootEl) return null;
+  if (!tourRootEl) return null;
 
   errorSpeaker ??= new ErrorSpeaker({
     root: tourRootEl,
@@ -3058,15 +2070,7 @@ function wireLibraryControls() {
       if (!popover) return;
       const willOpen = popover.hidden;
       if (willOpen) {
-        const defaultPosition = ensurePopoverDefaultPosition(popover, index);
-        popover.hidden = false;
-        const key = popover.dataset.popover ?? "";
-        setPopoverPosition(
-          popover,
-          key ? popoverSessionPositions.get(key) ?? defaultPosition : defaultPosition,
-        );
-        bringPopoverToFront(popover);
-        makePopoverDraggable(popover);
+        openPopover(popover, index);
         if (name === "camera") {
           void refreshCameraList({ primePermission: true });
         }
@@ -3090,127 +2094,6 @@ function wireLibraryControls() {
       if (item) item.dataset.open = "false";
     });
   }
-}
-
-let popoverZIndex = 40;
-type PopoverPosition = { left: number; top: number };
-const POPOVER_VIEWPORT_PADDING = 8;
-const popoverSessionPositions = new Map<string, PopoverPosition>();
-
-function bringPopoverToFront(popover: HTMLElement) {
-  popoverZIndex += 1;
-  popover.style.zIndex = String(popoverZIndex);
-}
-
-function ensurePopoverDefaultPosition(popover: HTMLElement, index: number): PopoverPosition {
-  if (!popover.dataset.defaultLeft || !popover.dataset.defaultTop) {
-    const offset = index * 28;
-    popover.dataset.defaultLeft = String(110 + offset);
-    popover.dataset.defaultTop = String(70 + offset);
-  }
-
-  return {
-    left: Number(popover.dataset.defaultLeft),
-    top: Number(popover.dataset.defaultTop),
-  };
-}
-
-function setPopoverPosition(
-  popover: HTMLElement,
-  position: PopoverPosition,
-  remember = true,
-) {
-  const clamped = clampPopoverPosition(popover, position);
-  popover.style.left = "0";
-  popover.style.top = "0";
-  popover.style.transform = `translate(${clamped.left}px, ${clamped.top}px)`;
-  popover.dataset.left = String(clamped.left);
-  popover.dataset.top = String(clamped.top);
-
-  const key = popover.dataset.popover;
-  if (remember && key) popoverSessionPositions.set(key, clamped);
-}
-
-function clampPopoverPosition(
-  popover: HTMLElement,
-  position: PopoverPosition,
-): PopoverPosition {
-  const maxLeft = Math.max(
-    POPOVER_VIEWPORT_PADDING,
-    window.innerWidth - popover.offsetWidth - POPOVER_VIEWPORT_PADDING,
-  );
-  const maxTop = Math.max(
-    POPOVER_VIEWPORT_PADDING,
-    window.innerHeight - popover.offsetHeight - POPOVER_VIEWPORT_PADDING,
-  );
-
-  return {
-    left: Math.min(Math.max(POPOVER_VIEWPORT_PADDING, position.left), maxLeft),
-    top: Math.min(Math.max(POPOVER_VIEWPORT_PADDING, position.top), maxTop),
-  };
-}
-
-function resetPopoverPosition(popover: HTMLElement) {
-  const key = popover.dataset.popover;
-  if (key) popoverSessionPositions.delete(key);
-
-  setPopoverPosition(
-    popover,
-    {
-      left: Number(popover.dataset.defaultLeft ?? 0),
-      top: Number(popover.dataset.defaultTop ?? 0),
-    },
-    false,
-  );
-}
-
-function makePopoverDraggable(popover: HTMLElement) {
-  if (popover.dataset.draggable === "true") return;
-  popover.dataset.draggable = "true";
-
-  const handle = popover.querySelector<HTMLElement>(".menu-popover__header");
-  if (!handle) return;
-
-  handle.addEventListener("pointerdown", (event) => {
-    if ((event.target as HTMLElement).closest(".menu-popover__close")) return;
-    if (event.button !== 0) return;
-    event.preventDefault();
-    bringPopoverToFront(popover);
-
-    const startLeft = Number(popover.dataset.left ?? popover.getBoundingClientRect().left);
-    const startTop = Number(popover.dataset.top ?? popover.getBoundingClientRect().top);
-    const startX = event.clientX;
-    const startY = event.clientY;
-    popover.dataset.dragging = "true";
-    handle.setPointerCapture(event.pointerId);
-
-    const onMove = (moveEvent: PointerEvent) => {
-      setPopoverPosition(popover, {
-        left: startLeft + moveEvent.clientX - startX,
-        top: startTop + moveEvent.clientY - startY,
-      });
-    };
-
-    const onUp = (upEvent: PointerEvent) => {
-      delete popover.dataset.dragging;
-      if (handle.hasPointerCapture(upEvent.pointerId)) {
-        handle.releasePointerCapture(upEvent.pointerId);
-      }
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
-      handle.removeEventListener("pointercancel", onUp);
-    };
-
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onUp);
-    handle.addEventListener("pointercancel", onUp);
-  });
-
-  handle.addEventListener("dblclick", (event) => {
-    if ((event.target as HTMLElement).closest(".menu-popover__close")) return;
-    event.preventDefault();
-    resetPopoverPosition(popover);
-  });
 }
 
 function openImportModal() {
@@ -3256,8 +2139,6 @@ async function handleImportFile() {
 
   try {
     const buffer = await file.arrayBuffer();
-    // .miic files carry a valid FFLStoreData prefix; store the normalized
-    // form so every downstream consumer (render, thumbnails) just works.
     const miiBytes = normalizeMiiBytes(new Uint8Array(buffer));
     const bytes = Array.from(miiBytes);
     let thumbnailDataUrl: string | null = null;
@@ -3355,18 +2236,12 @@ async function renderMiiThumbnail(miiBytes: Uint8Array): Promise<string> {
 
 async function renderAvatarBytes(miiBytes: number[], name: string) {
   try {
-    // Resolve the FFL context FIRST. If AFLResHigh_2_3.dat is missing this
-    // blocks on the "choose the resource file" prompt, which owns the red
-    // status message + Choose-file button. Setting a "Rendering..." status
-    // before this resolves would clobber that prompt, leaving the user staring
-    // at a spinner with no idea they still need to pick the resource file.
     const ffl = await getFflContext();
     setStatus("Rendering with in-process FFL.js...");
     const loadResult = await avatarScene.loadModelFromMiiBytes(
       normalizeMiiBytes(new Uint8Array(miiBytes)),
       ffl,
     );
-    saveCleanOutputAvatar({ name, bytes: miiBytes });
     const expressionIndex = applyExpressionPose(FFLExpression.Normal, {
       pitch: 0,
       yaw: 0,
@@ -3380,8 +2255,6 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
     avatarLoaded = true;
     avatarHasExpressionVariants = loadResult.expressionCount > 0;
     setTrackingButtons();
-    setOutputButtons();
-    void publishCleanOutputAvatarSnapshot();
 
     logRenderEvent("avatar render succeeded", {
       name,
@@ -3400,8 +2273,6 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
     avatarLoaded = false;
     avatarHasExpressionVariants = false;
     setTrackingButtons();
-    setOutputButtons();
-    setCleanOutputMode(false);
     setStatus(userFacingError("AVATAR_RENDER_FAILED", error, {
       renderer: "ffl.js",
     }), "error");

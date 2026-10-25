@@ -11,8 +11,7 @@ import { attachBodyToCharModel, type AttachedBody } from "./bodyModel";
 /**
  * In-process Mii thumbnail rendering.
  *
- * Renders the full body with the same FFL.js pipeline the live workspace and
- * clean-output window use, on a throwaway transparent offscreen canvas.
+ * Uses the workspace FFL.js pipeline on a temporary transparent canvas.
  */
 const THUMBNAIL_SIZE = 256;
 
