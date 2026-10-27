@@ -76,7 +76,7 @@ export function classifyChannels(
 export function composeExpression(channels: ExpressionChannels): FFLExpression {
   const mouthOpen = channels.mouth === "open";
 
-  if (channels.eyes === "blink_both") {
+  if (channels.eyes === "blink_both" && channels.emotion === "normal") {
     return mouthOpen ? FFLExpression.BlinkOpenMouth : FFLExpression.Blink;
   }
 

@@ -38,14 +38,24 @@ describe("auto blink timing", () => {
 });
 
 describe("withBlink", () => {
-  it("closes the eyes while keeping the mouth state", () => {
+  it("closes the eyes on neutral faces while keeping the mouth state", () => {
     expect(withBlink(FFLExpression.Normal)).toBe(FFLExpression.Blink);
-    expect(withBlink(FFLExpression.Smile)).toBe(FFLExpression.Blink);
     expect(withBlink(FFLExpression.OpenMouth)).toBe(FFLExpression.BlinkOpenMouth);
-    expect(withBlink(FFLExpression.Happy)).toBe(FFLExpression.BlinkOpenMouth);
-    expect(withBlink(FFLExpression.SurpriseOpenMouth)).toBe(
-      FFLExpression.BlinkOpenMouth,
-    );
+  });
+
+  it("holds emotions instead of replacing them with a neutral blink", () => {
+    for (const expression of [
+      FFLExpression.Smile,
+      FFLExpression.Happy,
+      FFLExpression.Anger,
+      FFLExpression.AngerOpenMouth,
+      FFLExpression.Sorrow,
+      FFLExpression.SorrowOpenMouth,
+      FFLExpression.Surprise,
+      FFLExpression.SurpriseOpenMouth,
+    ]) {
+      expect(withBlink(expression)).toBe(expression);
+    }
   });
 
   it("leaves expressions that already close an eye untouched", () => {
