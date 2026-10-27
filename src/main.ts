@@ -253,9 +253,17 @@ import {
   BODY_VISIBLE_STORAGE_KEY,
   MIRROR_TRACKING_STORAGE_KEY,
   readBooleanPreference,
+  readStringPreference,
+  SHADING_STYLE_STORAGE_KEY,
   SHOW_DEBUG_INFO_STORAGE_KEY,
   writeBooleanPreference,
+  writeStringPreference,
 } from "./lib/preferences";
+import {
+  DEFAULT_SHADING_STYLE,
+  isShadingStyle,
+  type ShadingStyle,
+} from "./lib/shadingStyle";
 import {
   expressionLabel,
   formatChannels,
@@ -313,6 +321,9 @@ const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-
 const bodyVisibleInput = document.querySelector<HTMLInputElement>("#body-visible");
 const autoBlinkInput = document.querySelector<HTMLInputElement>("#auto-blink");
 const mirrorTrackingInput = document.querySelector<HTMLInputElement>("#mirror-tracking");
+const shadingStyleSelect = document.querySelector<HTMLSelectElement>(
+  "#shading-style-select",
+);
 const transparentBackgroundInput = document.querySelector<HTMLInputElement>(
   "#transparent-background",
 );
@@ -676,6 +687,7 @@ async function initializeMainWindow() {
   initializeBodyVisibleToggle();
   initializeAutoBlink();
   initializeMirrorTracking();
+  initializeShadingStyle();
   initializeDebugInfoToggle();
   resetAvatarTrackingState();
   setTrackingButtons();
@@ -839,6 +851,11 @@ mirrorTrackingInput?.addEventListener("change", () => {
   writeBooleanPreference(MIRROR_TRACKING_STORAGE_KEY, enabled);
   expressionPipeline.setMirrorTracking(enabled);
   logRenderEvent("mirror tracking toggled", { enabled });
+});
+
+shadingStyleSelect?.addEventListener("change", () => {
+  const style = shadingStyleSelect.value;
+  if (isShadingStyle(style)) void applyShadingStyle(style);
 });
 
 bodyVisibleInput?.addEventListener("change", () => {
@@ -1720,6 +1737,36 @@ function initializeMirrorTracking() {
   const enabled = readBooleanPreference(MIRROR_TRACKING_STORAGE_KEY, false);
   if (mirrorTrackingInput) mirrorTrackingInput.checked = enabled;
   expressionPipeline.setMirrorTracking(enabled);
+}
+
+let activeShadingStyle: ShadingStyle = DEFAULT_SHADING_STYLE;
+
+function initializeShadingStyle() {
+  const stored = readStringPreference(SHADING_STYLE_STORAGE_KEY);
+  activeShadingStyle = isShadingStyle(stored) ? stored : DEFAULT_SHADING_STYLE;
+  if (shadingStyleSelect) shadingStyleSelect.value = activeShadingStyle;
+  // No model is loaded yet, so this only sets the style the first load uses.
+  void avatarScene.setShadingStyle(activeShadingStyle);
+}
+
+async function applyShadingStyle(style: ShadingStyle) {
+  const previous = activeShadingStyle;
+  activeShadingStyle = style;
+  writeStringPreference(SHADING_STYLE_STORAGE_KEY, style);
+  try {
+    await avatarScene.setShadingStyle(style);
+    logRenderEvent("shading style changed", { style });
+  } catch (error) {
+    // The rebuild failed before the old model was disposed, so the previous
+    // style is still on screen. Put the picker back to match it.
+    console.error("[MiiTuber] shading style change failed", { style, error });
+    if (activeShadingStyle !== style) return; // A newer change superseded this one.
+    activeShadingStyle = previous;
+    writeStringPreference(SHADING_STYLE_STORAGE_KEY, previous);
+    if (shadingStyleSelect) shadingStyleSelect.value = previous;
+    void avatarScene.setShadingStyle(previous);
+    setStatus("Could not switch shading style.", "error");
+  }
 }
 
 function tickAutoBlink() {

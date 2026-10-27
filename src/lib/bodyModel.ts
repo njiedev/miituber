@@ -3,6 +3,7 @@ import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js"
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import type { CharModel } from "ffl.js";
 import type { BodyModel } from "ffl.js/helpers/BodyUtilities.js";
+import { needsColorInfo, type ShadingMaterials } from "./shadingStyle";
 
 /** Body GLBs live in public/body/ and are served from the web root. */
 export const BODY_MODEL_URLS = ["/body/male.glb", "/body/female.glb"] as const;
@@ -37,21 +38,25 @@ export function loadBodyTemplates(
 
 export async function attachBodyToCharModel(
   charModel: CharModel,
+  materials: ShadingMaterials,
   loader?: GLTFLoader,
 ): Promise<AttachedBody> {
   const [
-    { prepareBodyForCharModel, attachHeadToBody, disposeModel },
+    {
+      prepareBodyForCharModel,
+      attachHeadToBody,
+      applyMaterialToGroup,
+      disposeModel,
+    },
     { detectModelDesc },
     { addSkeletonScalingExtensions },
     { PantsColor, pantsColors },
-    { default: FFLShaderMaterial },
     { clone: cloneSkinned },
   ] = await Promise.all([
     import("ffl.js/helpers/BodyUtilities.js"),
     import("ffl.js/helpers/ModelScaleDesc.js"),
     import("ffl.js/helpers/SkeletonScalingExtensions.js"),
     import("ffl.js"),
-    import("ffl.js/materials/FFLShaderMaterial.js"),
     import("three/examples/jsm/utils/SkeletonUtils.js"),
   ]);
 
@@ -81,11 +86,18 @@ export async function attachBodyToCharModel(
   const pantsColor = pantsColors[PantsColor.GrayNormal].clone();
   prepareBodyForCharModel(
     body,
-    FFLShaderMaterial,
+    materials.material,
     charModel.favoriteColor,
     charModel.getBodyScale(),
     pantsColor,
   );
+  // prepareBodyForCharModel passes no colorInfo (an upstream TODO), which
+  // leaves the Switch shader unlit. Reapply it with colorInfo; colors carry
+  // over from the old materials. Runs before the head is attached so only the
+  // body meshes are touched.
+  if (needsColorInfo(materials.material)) {
+    applyMaterialToGroup(body.model, materials.material, charModel.getColorInfo());
+  }
 
   const headPivot = new THREE.Group();
   headPivot.name = "head-pivot";

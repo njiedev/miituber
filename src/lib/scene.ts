@@ -5,7 +5,16 @@ import type { BodyModel } from "ffl.js/helpers/BodyUtilities.js";
 import type { HeadRotation } from "./types";
 import { FFLExpression } from "./types";
 import { createCharModel, type FFLContext } from "./fflRenderer";
-import { attachBodyToCharModel, computeVisualBox } from "./bodyModel";
+import {
+  attachBodyToCharModel,
+  computeVisualBox,
+  type AttachedBody,
+} from "./bodyModel";
+import {
+  DEFAULT_SHADING_STYLE,
+  loadShadingMaterials,
+  type ShadingStyle,
+} from "./shadingStyle";
 
 const FFL_SUPPORTED_EXPRESSION_COUNT = Object.values(FFLExpression).filter(
   (value): value is FFLExpression => typeof value === "number",
@@ -59,6 +68,15 @@ export class AvatarScene {
   /** Captured disposeModel() from BodyUtilities so sync teardown can use it. */
   private disposeBodyModelFn: ((model: THREE.Object3D) => void) | null = null;
   private bodyVisible = true;
+  private shadingStyle: ShadingStyle = DEFAULT_SHADING_STYLE;
+  /** Style the current model was built with; differs from shadingStyle while a rebuild is pending. */
+  private builtShadingStyle: ShadingStyle | null = null;
+  /** Source of the current model, kept so a style change can rebuild it. */
+  private loadedMii: { bytes: Uint8Array; ffl: FFLContext } | null = null;
+  /** Model builds are async; chaining them keeps a style change from racing a load. */
+  private modelTask: Promise<unknown> = Promise.resolve();
+  private expressionIndex = 0;
+  private headRotation: HeadRotation | null = null;
   private renderFrameCount = 0;
   private lastRenderFpsAt = performance.now();
   /** World-space point the camera orbits/points at (the framed model's center). */
@@ -127,49 +145,58 @@ export class AvatarScene {
     miiBytes: Uint8Array,
     ffl: FFLContext,
   ): Promise<AvatarLoadResult> {
-    this.disposeCurrentModel();
+    return this.enqueueModelTask(async () => {
+      this.disposeCurrentModel();
+      const style = this.shadingStyle;
+      const built = await this.buildModel(miiBytes, ffl, style);
+      this.loadedMii = { bytes: miiBytes, ffl };
+      const meshCount = this.installModel(built.charModel, built.attached, style);
 
-    const charModel = await createCharModel(ffl, miiBytes, this.renderer);
-    this.charModel = charModel;
+      // Skinned meshes only get valid world transforms once rendered, and the
+      // bone-driven head pivot only settles onto the neck after a skeleton
+      // update — so add and render one frame BEFORE framing, or the fit box
+      // measures the bind pose with a mislocated head.
+      this.renderer.render(this.scene, this.camera);
+      const framing = this.frameModel(built.attached.body.model);
+      this.setExpression(0);
 
-    // Attach a scaled body; the head is parented onto its neck bone, so the
-    // body's root is what gets added to the scene and framed.
-    const attached = await attachBodyToCharModel(charModel);
-    this.bodyModel = attached.body;
-    this.currentModel = attached.body.model;
-    this.headRoot = attached.headRoot;
-    this.disposeBodyModelFn = attached.disposeBodyModel;
-    this.applyBodyVisibility();
-
-    let meshCount = 0;
-    this.currentModel.traverse((child) => {
-      const mesh = child as MeshWithMaterial;
-      if (!mesh.isMesh) return;
-      meshCount += 1;
-      mesh.frustumCulled = false;
+      return {
+        meshCount,
+        expressionCount: FFL_SUPPORTED_EXPRESSION_COUNT,
+        ...framing,
+      };
     });
+  }
 
-    // Skinned meshes only get valid world transforms once rendered, and the
-    // bone-driven head pivot only settles onto the neck after a skeleton
-    // update — so add and render one frame BEFORE framing, or the fit box
-    // measures the bind pose with a mislocated head.
-    this.modelRoot.add(this.currentModel);
-    this.renderer.render(this.scene, this.camera);
-    const framing = this.frameModel(this.currentModel);
-    this.setExpression(0);
+  /**
+   * Switch the lighting style. A loaded model is rebuilt rather than having its
+   * materials swapped in place: the face textures are drawn differently per
+   * style, so a rebuild is the one path that is correct for every style.
+   */
+  setShadingStyle(style: ShadingStyle): Promise<void> {
+    this.shadingStyle = style;
+    return this.enqueueModelTask(async () => {
+      // Rapid changes queue several rebuilds; only the latest style matters.
+      const target = this.shadingStyle;
+      if (!this.loadedMii || target === this.builtShadingStyle) return;
 
-    return {
-      meshCount,
-      expressionCount: FFL_SUPPORTED_EXPRESSION_COUNT,
-      ...framing,
-    };
+      const { bytes, ffl } = this.loadedMii;
+      const built = await this.buildModel(bytes, ffl, target);
+      // Same Mii, so the existing framing and camera still fit. Skip
+      // frameModel() to keep the user's view.
+      this.disposeCurrentModel();
+      this.loadedMii = { bytes, ffl };
+      this.installModel(built.charModel, built.attached, target);
+    });
   }
 
   setExpression(index: number) {
+    this.expressionIndex = index;
     this.charModel?.setExpression(index);
   }
 
   setHeadRotation(rotation: HeadRotation) {
+    this.headRotation = rotation;
     // With a body attached, rotate only the head group (childed to the neck
     // bone) so the head turns on the body; otherwise rotate the whole model.
     const target = this.headRoot ?? this.currentModel;
@@ -185,6 +212,58 @@ export class AvatarScene {
   setBodyVisible(visible: boolean) {
     this.bodyVisible = visible;
     this.applyBodyVisibility();
+  }
+
+  private enqueueModelTask<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.modelTask.then(task, task);
+    this.modelTask = run.catch(() => undefined);
+    return run;
+  }
+
+  private async buildModel(
+    miiBytes: Uint8Array,
+    ffl: FFLContext,
+    style: ShadingStyle,
+  ): Promise<{ charModel: CharModel; attached: AttachedBody }> {
+    const materials = await loadShadingMaterials(style);
+    const charModel = await createCharModel(ffl, miiBytes, this.renderer, materials);
+    try {
+      // Attach a scaled body; the head is parented onto its neck bone, so the
+      // body's root is what gets added to the scene and framed.
+      const attached = await attachBodyToCharModel(charModel, materials);
+      return { charModel, attached };
+    } catch (error) {
+      charModel.dispose();
+      throw error;
+    }
+  }
+
+  /** Put a built model in the scene and restore pose state. Returns the mesh count. */
+  private installModel(
+    charModel: CharModel,
+    attached: AttachedBody,
+    style: ShadingStyle,
+  ): number {
+    this.charModel = charModel;
+    this.builtShadingStyle = style;
+    this.bodyModel = attached.body;
+    this.currentModel = attached.body.model;
+    this.headRoot = attached.headRoot;
+    this.disposeBodyModelFn = attached.disposeBodyModel;
+    this.applyBodyVisibility();
+
+    let meshCount = 0;
+    this.currentModel.traverse((child) => {
+      const mesh = child as MeshWithMaterial;
+      if (!mesh.isMesh) return;
+      meshCount += 1;
+      mesh.frustumCulled = false;
+    });
+
+    this.modelRoot.add(this.currentModel);
+    this.setExpression(this.expressionIndex);
+    if (this.headRotation) this.setHeadRotation(this.headRotation);
+    return meshCount;
   }
 
   private applyBodyVisibility() {
@@ -334,6 +413,8 @@ export class AvatarScene {
         this.charModel.dispose();
       }
       this.charModel = null;
+      this.builtShadingStyle = null;
+      this.loadedMii = null;
       this.currentModel = null;
       this.headRoot = null;
       this.disposeBodyModelFn = null;

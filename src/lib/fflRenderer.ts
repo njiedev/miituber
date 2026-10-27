@@ -1,5 +1,6 @@
 import type * as THREE from "three";
 import type { CharModel, FFL as FFLContext } from "ffl.js";
+import type { ShadingMaterials } from "./shadingStyle";
 
 export type { FFLContext };
 
@@ -57,15 +58,11 @@ export async function createCharModel(
   ffl: FFLContext,
   miiBytes: Uint8Array,
   renderer: THREE.WebGLRenderer,
+  materials: ShadingMaterials,
   extraExpressions: readonly number[] = [],
 ): Promise<CharModel> {
-  const [
-    { CharModel, FFLCharModelDescDefault, makeExpressionFlag },
-    { default: FFLShaderMaterial },
-  ] = await Promise.all([
-    import("ffl.js"),
-    import("ffl.js/materials/FFLShaderMaterial.js"),
-  ]);
+  const { CharModel, FFLCharModelDescDefault, makeExpressionFlag } =
+    await import("ffl.js");
 
   const standardExpressions = Array.from(
     { length: MAX_STANDARD_EXPRESSION + 1 },
@@ -79,7 +76,11 @@ export async function createCharModel(
     ]),
   };
 
-  return new CharModel(ffl, miiBytes, desc, FFLShaderMaterial, renderer);
+  // Skip the constructor's renderer argument so the face textures can be drawn
+  // with a different material than the meshes (needed for the 3DS/Wii styles).
+  const charModel = new CharModel(ffl, miiBytes, desc, materials.material);
+  charModel.initTextures(renderer, materials.textureMaterial);
+  return charModel;
 }
 
 function normalizeResource(resource: ArrayBuffer | Uint8Array): Uint8Array {
