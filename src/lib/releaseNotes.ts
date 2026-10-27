@@ -3,6 +3,14 @@ export type ReleaseNotes = {
   title: string;
   items: readonly string[];
   footer?: string;
+  /** Shown under the items as a prompt followed by a Discord invite button. */
+  discord?: {
+    prompt: string;
+    label: string;
+    url: string;
+  };
+  /** Small print shown at the bottom of the modal. */
+  footnote?: string;
   imageUrl: string;
 };
 

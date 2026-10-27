@@ -30,6 +30,14 @@ function validateNotes(notes, expectedVersion) {
   if (notes.footer !== undefined) {
     requireString(notes.footer, "Release notes footer");
   }
+  if (notes.discord !== undefined) {
+    requireString(notes.discord?.prompt, "Release notes discord prompt");
+    requireString(notes.discord?.label, "Release notes discord label");
+    requireString(notes.discord?.url, "Release notes discord url");
+  }
+  if (notes.footnote !== undefined) {
+    requireString(notes.footnote, "Release notes footnote");
+  }
 }
 
 function toMarkdown(notes) {
@@ -37,7 +45,12 @@ function toMarkdown(notes) {
     `## ${notes.title}`,
     notes.items.map((item) => `- ${item}`).join("\n"),
   ];
+  if (notes.discord) {
+    const { prompt, label, url } = notes.discord;
+    sections.push(`${prompt} [${label}](${url})`);
+  }
   if (notes.footer) sections.push(notes.footer);
+  if (notes.footnote) sections.push(`<sub>${notes.footnote}</sub>`);
   return `${sections.join("\n\n")}\n`;
 }
 

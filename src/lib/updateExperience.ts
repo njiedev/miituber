@@ -3,6 +3,7 @@ import {
   check as checkForUpdate,
   type Update,
 } from "@tauri-apps/plugin-updater";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { reportAppError } from "./appDiagnostics";
 import { LIBRARY_STORAGE_KEY } from "./avatarLibrary";
@@ -49,6 +50,19 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
   const updateModalFooterNote = document.querySelector<HTMLElement>(
     "#update-modal-footer-note",
   );
+  const updateModalDiscord =
+    document.querySelector<HTMLElement>("#update-modal-discord");
+  const updateModalDiscordPrompt = document.querySelector<HTMLElement>(
+    "#update-modal-discord-prompt",
+  );
+  const updateModalDiscordLink = document.querySelector<HTMLAnchorElement>(
+    "#update-modal-discord-link",
+  );
+  const updateModalDiscordLabel = document.querySelector<HTMLElement>(
+    "#update-modal-discord-label",
+  );
+  const updateModalFootnote =
+    document.querySelector<HTMLElement>("#update-modal-footnote");
   const updateModalProgressWrap = document.querySelector<HTMLElement>(
     "#update-modal-progress-wrap",
   );
@@ -127,6 +141,17 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
     updatePrimaryButton?.addEventListener("click", () => updatePrimaryAction?.());
     updateSecondaryButton?.addEventListener("click", () => updateSecondaryAction?.());
     updateCloseButton?.addEventListener("click", () => updateCloseAction?.());
+    updateModalDiscordLink?.addEventListener("click", (event) => {
+      event.preventDefault();
+      const url = updateModalDiscordLink.href;
+      if (!deps.isTauri) {
+        window.open(url, "_blank", "noopener");
+        return;
+      }
+      openUrl(url).catch((error) => {
+        reportAppError("UNEXPECTED_ERROR", error, { action: "open Discord invite" });
+      });
+    });
     updateModalImage?.addEventListener("error", () => {
       updateModalImage.hidden = true;
     });
@@ -286,7 +311,17 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
       updateModalNotes.replaceChildren(
         ...release.items.map((item) => {
           const listItem = document.createElement("li");
-          listItem.textContent = item;
+          // **text** renders bold, matching the GitHub release markdown.
+          item.split(/\*\*(.+?)\*\*/).forEach((part, index) => {
+            if (!part) return;
+            if (index % 2 === 0) {
+              listItem.append(part);
+            } else {
+              const strong = document.createElement("strong");
+              strong.textContent = part;
+              listItem.append(strong);
+            }
+          });
           return listItem;
         }),
       );
@@ -295,6 +330,20 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
     if (updateModalFooterNote) {
       updateModalFooterNote.textContent = release.footer ?? "";
       updateModalFooterNote.hidden = !release.footer;
+    }
+    if (updateModalDiscord && release.discord) {
+      if (updateModalDiscordPrompt) {
+        updateModalDiscordPrompt.textContent = release.discord.prompt;
+      }
+      if (updateModalDiscordLabel) {
+        updateModalDiscordLabel.textContent = release.discord.label;
+      }
+      if (updateModalDiscordLink) updateModalDiscordLink.href = release.discord.url;
+      updateModalDiscord.hidden = false;
+    }
+    if (updateModalFootnote) {
+      updateModalFootnote.textContent = release.footnote ?? "";
+      updateModalFootnote.hidden = !release.footnote;
     }
     setUpdateModalButtons(null, null, null, null);
     updateCloseAction = () => {
@@ -356,6 +405,11 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
     if (updateModalFooterNote) {
       updateModalFooterNote.hidden = true;
       updateModalFooterNote.textContent = "";
+    }
+    if (updateModalDiscord) updateModalDiscord.hidden = true;
+    if (updateModalFootnote) {
+      updateModalFootnote.hidden = true;
+      updateModalFootnote.textContent = "";
     }
     if (updateModalProgressWrap) updateModalProgressWrap.hidden = true;
     if (updateModalDetail) {

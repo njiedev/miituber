@@ -93,11 +93,6 @@ select {
   font-size: 0.85rem;
 }
 
-.app-disclaimer {
-  color: var(--text-soft);
-  font-size: 0.72rem;
-}
-
 .side-rail {
   position: absolute;
   top: 16px;
@@ -845,7 +840,10 @@ select {
   align-items: stretch;
   gap: 28px;
   width: min(720px, 100%);
-  padding: 30px 34px;
+  max-height: calc(100vh - 48px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 26px 34px;
   text-align: left;
 }
 
@@ -966,6 +964,52 @@ select {
 
 .update-card__footer-note[hidden] {
   display: none;
+}
+
+.update-card__discord {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px !important;
+  color: var(--text) !important;
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+
+.update-card__discord[hidden],
+.update-card__footnote[hidden] {
+  display: none;
+}
+
+/* Matches the Discord chip on miituber.com. */
+.discord-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  border: 1px solid #000000;
+  border-radius: 999px;
+  background: #5865f2;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.discord-chip:hover {
+  background: #3c45a5;
+}
+
+.discord-chip__logo {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.update-card__footnote {
+  margin-top: 14px !important;
+  font-size: 0.72rem;
 }
 
 .update-card__notes[hidden],

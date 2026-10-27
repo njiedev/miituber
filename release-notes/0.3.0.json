@@ -1,0 +1,20 @@
+{
+  "version": "0.3.0",
+  "title": "What’s New in MiiTuber 0.3.0",
+  "items": [
+    "Added **Mouse tracking**. In the Tracking menu, set Track with to Mouse and your Mii looks at your cursor, even while a game is fullscreen. Keep MiiTuber open, not minimized.",
+    "Added **blink settings** to the Tracking menu. Choose Camera, Camera + auto, or Auto only, and set how often and how long your Mii blinks. Auto only helps if glasses or glare cause false blinks.",
+    "Added **Shading style** to the Avatar menu. Choose Wii U, Switch, Miitomo, 3DS, or Wii lighting for your Mii.",
+    "Added Mirror tracking to the Tracking menu. Your Mii turns, tilts, and winks the opposite way, which helps if you flip the capture in OBS.",
+    "Added Head Rotation Offset to Advanced tuning. Use the Pitch, Roll, and Yaw sliders to tilt or turn your Mii's head by a fixed amount.",
+    "Blinking no longer resets your Mii's expression. Happy, angry, sad, and surprised faces stay on while you blink.",
+    "Reorganized the side menu into Avatar, Tracking, Microphone, Scene, and Advanced. Show body is now in Avatar, and the background settings are in Scene."
+  ],
+  "discord": {
+    "prompt": "Want to give feedback?",
+    "label": "Join the Discord",
+    "url": "https://discord.gg/VN8v8QbsMt"
+  },
+  "footnote": "Mii Creator custom features do not work with MiiTuber.",
+  "imageUrl": "/update-modal-mii.gif"
+}
