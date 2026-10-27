@@ -4,6 +4,7 @@ export const AUTO_BLINK_OPTIONS_STORAGE_KEY = "miituber.autoBlinkOptions.v1";
 export const MIRROR_TRACKING_STORAGE_KEY = "miituber.mirrorTracking.v1";
 export const SHOW_DEBUG_INFO_STORAGE_KEY = "miituber.showDebugInfo.v1";
 export const SHADING_STYLE_STORAGE_KEY = "miituber.shadingStyle.v1";
+export const TRACKING_SOURCE_STORAGE_KEY = "miituber.trackingSource.v1";
 
 export function readBooleanPreference(key: string, fallback: boolean): boolean {
   try {

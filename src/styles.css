@@ -512,6 +512,10 @@ select {
   display: none;
 }
 
+#camera-tracking-fields:not([hidden]) {
+  display: contents;
+}
+
 .menu-popover {
   position: fixed;
   z-index: 40;
@@ -580,6 +584,10 @@ select {
   color: var(--text-soft);
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.field[hidden] {
+  display: none;
 }
 
 .hint {
