@@ -118,23 +118,35 @@
               <button class="menu-popover__close" type="button" data-close="tracking">&times;</button>
             </div>
             <label class="field">
-              Device
-              <select id="camera-select" disabled>
-                <option value="">Default camera</option>
+              Track with
+              <select id="tracking-source-select">
+                <option value="camera">Camera</option>
+                <option value="mouse">Mouse</option>
               </select>
             </label>
-            <label class="field">
-              Tracking FPS
-              <select id="tracking-fps-select">
-                <option value="24">24</option>
-                <option value="30">30</option>
-                <option value="60" selected>60</option>
-              </select>
-            </label>
-            <label class="check" title="Mirror head turns, tilts and winks">
-              <input id="mirror-tracking" type="checkbox" />
-              Mirror tracking
-            </label>
+            <div id="camera-tracking-fields">
+              <label class="field">
+                Device
+                <select id="camera-select" disabled>
+                  <option value="">Default camera</option>
+                </select>
+              </label>
+              <label class="field">
+                Tracking FPS
+                <select id="tracking-fps-select">
+                  <option value="24">24</option>
+                  <option value="30">30</option>
+                  <option value="60" selected>60</option>
+                </select>
+              </label>
+              <label class="check" title="Mirror head turns, tilts and winks">
+                <input id="mirror-tracking" type="checkbox" />
+                Mirror tracking
+              </label>
+            </div>
+            <p id="mouse-tracking-note" class="privacy-note" hidden>
+              Your Mii looks at your cursor, even while a game is fullscreen. Keep MiiTuber open, not minimized.
+            </p>
             <section class="eye-settings" aria-labelledby="eye-settings-title">
               <h3 id="eye-settings-title">Eyes</h3>
               <div class="field">

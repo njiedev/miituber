@@ -209,6 +209,22 @@ export class AvatarScene {
     );
   }
 
+  headClientPosition(): { x: number; y: number } | null {
+    const target = this.headRoot ?? this.currentModel;
+    if (!target) return null;
+
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+
+    const world = new THREE.Vector3();
+    target.getWorldPosition(world);
+    world.project(this.camera);
+    return {
+      x: rect.left + ((world.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - world.y) / 2) * rect.height,
+    };
+  }
+
   setBodyVisible(visible: boolean) {
     this.bodyVisible = visible;
     this.applyBodyVisibility();

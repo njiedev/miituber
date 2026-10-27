@@ -10,6 +10,7 @@ import {
   zeroExpressionSignals,
 } from "./lib/expressionPipeline";
 import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
+import { MouseTracker } from "./lib/mouseTracker";
 import { AvatarPoseCoordinator } from "./lib/avatarPoseCoordinator";
 import {
   AutoBlinker,
@@ -267,6 +268,7 @@ import {
   readStringPreference,
   SHADING_STYLE_STORAGE_KEY,
   SHOW_DEBUG_INFO_STORAGE_KEY,
+  TRACKING_SOURCE_STORAGE_KEY,
   writeBooleanPreference,
   writeJsonPreference,
   writeStringPreference,
@@ -340,6 +342,7 @@ const blinkModeInputs = Array.from(
   document.querySelectorAll<HTMLInputElement>('input[name="blink-mode"]'),
 );
 const blinkModeHintEl = document.querySelector<HTMLElement>("#blink-mode-hint");
+const blinkModeFieldEl = blinkModeHintEl?.closest<HTMLElement>(".field") ?? null;
 const blinkRateInput = document.querySelector<HTMLInputElement>("#blink-rate");
 const blinkRateValueEl = document.querySelector<HTMLOutputElement>("#blink-rate-value");
 const blinkDurationInput = document.querySelector<HTMLInputElement>("#blink-duration");
@@ -364,6 +367,13 @@ const stopTrackingButton = document.querySelector<HTMLButtonElement>(
 );
 const trackingStatusEl = document.querySelector<HTMLElement>("#tracking-status");
 const cameraSelect = document.querySelector<HTMLSelectElement>("#camera-select");
+const trackingSourceSelect = document.querySelector<HTMLSelectElement>(
+  "#tracking-source-select",
+);
+const cameraTrackingFieldsEl = document.querySelector<HTMLElement>(
+  "#camera-tracking-fields",
+);
+const mouseTrackingNoteEl = document.querySelector<HTMLElement>("#mouse-tracking-note");
 const trackingFpsSelect = document.querySelector<HTMLSelectElement>(
   "#tracking-fps-select",
 );
@@ -586,6 +596,22 @@ function setTrackingButtons() {
   if (trackingFpsSelect) {
     trackingFpsSelect.disabled = tracking;
   }
+
+  if (trackingSourceSelect) {
+    trackingSourceSelect.disabled = tracking;
+  }
+}
+
+type TrackingSource = "camera" | "mouse";
+
+function getTrackingSource(): TrackingSource {
+  return trackingSourceSelect?.value === "mouse" ? "mouse" : "camera";
+}
+
+function showTrackingSourceFields(source: TrackingSource) {
+  if (cameraTrackingFieldsEl) cameraTrackingFieldsEl.hidden = source !== "camera";
+  if (mouseTrackingNoteEl) mouseTrackingNoteEl.hidden = source !== "mouse";
+  if (blinkModeFieldEl) blinkModeFieldEl.hidden = source !== "camera";
 }
 
 function getTrackingFps() {
@@ -708,6 +734,7 @@ const avatarScene = new AvatarScene(canvas, {
   },
 });
 const faceTracker = new FaceTracker();
+const mouseTracker = new MouseTracker();
 const expressionPipeline = new ExpressionPipeline(tuningProfile);
 const avatarPoseCoordinator = new AvatarPoseCoordinator(expressionPipeline);
 
@@ -722,6 +749,7 @@ async function initializeMainWindow() {
   initializeBodyVisibleToggle();
   initializeAutoBlink();
   initializeMirrorTracking();
+  initializeTrackingSource();
   initializeShadingStyle();
   initializeDebugInfoToggle();
   resetAvatarTrackingState();
@@ -893,6 +921,14 @@ for (const input of [blinkRateInput, blinkDurationInput]) {
     applyAutoBlinkOptions(options);
   });
 }
+
+trackingSourceSelect?.addEventListener("change", () => {
+  const source = getTrackingSource();
+  writeStringPreference(TRACKING_SOURCE_STORAGE_KEY, source);
+  showTrackingSourceFields(source);
+  applyBlinkMode(blinkMode);
+  logRenderEvent("tracking source changed", { source });
+});
 
 mirrorTrackingInput?.addEventListener("change", () => {
   const enabled = mirrorTrackingInput.checked;
@@ -1577,6 +1613,11 @@ async function startTracking() {
     return;
   }
 
+  if (getTrackingSource() === "mouse") {
+    startMouseTracking();
+    return;
+  }
+
   try {
     tracking = true;
     setTrackingButtons();
@@ -1603,6 +1644,42 @@ async function startTracking() {
   }
 }
 
+function startMouseTracking() {
+  if (!isRunningInTauri()) {
+    setTrackingStatus("Mouse tracking only works in the MiiTuber app.", "error");
+    return;
+  }
+
+  tracking = true;
+  setTrackingButtons();
+  mouseTracker.start(
+    {
+      getHeadClientPosition: () => avatarScene.headClientPosition(),
+      onRotation: (rotation) => {
+        setAvatarPose(baseExpressionIndex, rotation);
+      },
+      onUnsupported: () => {
+        tracking = false;
+        resetAvatarTrackingState();
+        setTrackingButtons();
+        setTrackingStatus(
+          "Couldn't read your cursor. On Linux, mouse tracking needs an X11 session (Wayland hides the cursor).",
+          "error",
+        );
+      },
+      onError: (error) => {
+        console.error("[MiiTuber] mouse tracking failed", error);
+        tracking = false;
+        resetAvatarTrackingState();
+        setTrackingButtons();
+        setTrackingStatus("Mouse tracking stopped unexpectedly.", "error");
+      },
+    },
+    currentAvatarPose.headRotation,
+  );
+  setTrackingStatus("Following your mouse.", "success");
+}
+
 function handleTrackingRuntimeError(error: unknown) {
   tracking = false;
   resetAvatarTrackingState();
@@ -1613,11 +1690,16 @@ function handleTrackingRuntimeError(error: unknown) {
 }
 
 stopTrackingButton?.addEventListener("click", () => {
-  stopTracking("Tracking stopped. Camera released.");
+  stopTracking(
+    getTrackingSource() === "mouse"
+      ? "Mouse tracking stopped."
+      : "Tracking stopped. Camera released.",
+  );
 });
 
 function stopTracking(message?: string) {
   faceTracker.stop();
+  mouseTracker.stop();
   tracking = false;
   resetAvatarTrackingState();
   setTrackingButtons();
@@ -1805,7 +1887,7 @@ function applyBlinkMode(mode: BlinkMode) {
   blinkMode = mode;
   for (const input of blinkModeInputs) input.checked = input.value === mode;
   if (blinkModeHintEl) blinkModeHintEl.textContent = BLINK_MODE_HINTS[mode];
-  const autoDisabled = !usesAutoBlink(mode);
+  const autoDisabled = !autoBlinkActive();
   if (blinkRateInput) blinkRateInput.disabled = autoDisabled;
   if (blinkDurationInput) blinkDurationInput.disabled = autoDisabled;
   expressionPipeline.setBlinkMode(mode);
@@ -1825,6 +1907,14 @@ function applyAutoBlinkOptions(options: AutoBlinkOptions) {
   if (blinkDurationInput) blinkDurationInput.value = String(options.durationMs);
   if (blinkDurationValueEl) blinkDurationValueEl.textContent = `${options.durationMs} ms`;
   autoBlinker.setOptions(options);
+}
+
+function initializeTrackingSource() {
+  const stored = readStringPreference(TRACKING_SOURCE_STORAGE_KEY);
+  const source: TrackingSource = stored === "mouse" ? "mouse" : "camera";
+  if (trackingSourceSelect) trackingSourceSelect.value = source;
+  showTrackingSourceFields(source);
+  applyBlinkMode(blinkMode);
 }
 
 function initializeMirrorTracking() {
@@ -1863,8 +1953,12 @@ async function applyShadingStyle(style: ShadingStyle) {
   }
 }
 
+function autoBlinkActive() {
+  return getTrackingSource() === "mouse" || usesAutoBlink(blinkMode);
+}
+
 function tickAutoBlink() {
-  const active = usesAutoBlink(blinkMode);
+  const active = autoBlinkActive();
   if (!active) autoBlinker.reset();
   const closed = active && autoBlinker.update(performance.now());
   if (closed === autoBlinkClosed) return;
@@ -2446,5 +2540,6 @@ async function renderAvatarBytes(miiBytes: number[], name: string) {
 
 window.addEventListener("beforeunload", () => {
   faceTracker.stop();
+  mouseTracker.stop();
   stopLipSync();
 });
