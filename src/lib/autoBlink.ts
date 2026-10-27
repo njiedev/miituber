@@ -51,9 +51,6 @@ export class AutoBlinker {
   }
 }
 
-// FFL expressions are whole-face presets, so there is no "angry with closed
-// eyes" variant. Swapping an emotion for Blink would also reset the brows and
-// mouth, so only neutral faces blink; every other expression is held as-is.
 const BLINK_VARIANTS = new Map<FFLExpression, FFLExpression>([
   [FFLExpression.Normal, FFLExpression.Blink],
   [FFLExpression.OpenMouth, FFLExpression.BlinkOpenMouth],

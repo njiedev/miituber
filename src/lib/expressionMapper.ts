@@ -76,8 +76,6 @@ export function classifyChannels(
 export function composeExpression(channels: ExpressionChannels): FFLExpression {
   const mouthOpen = channels.mouth === "open";
 
-  // Blink is a neutral preset, so closing both eyes only shows on a neutral
-  // face. Emotions keep their own eyes; smiling already squints them shut.
   if (channels.eyes === "blink_both" && channels.emotion === "normal") {
     return mouthOpen ? FFLExpression.BlinkOpenMouth : FFLExpression.Blink;
   }
