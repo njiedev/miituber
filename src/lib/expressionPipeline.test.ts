@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BlinkMode } from "./autoBlink";
 import {
   averageBlendshapeSamples,
   calibrateBlendshapes,
@@ -167,20 +168,20 @@ describe("ExpressionPipeline", () => {
   });
 });
 
-describe("brief blink suppression", () => {
+describe("blink modes", () => {
   const closedEyes = shapes({ eyeBlinkLeft: 0.9, eyeBlinkRight: 0.9 });
 
-  function pipeline(suppress: boolean) {
+  function pipeline(mode: BlinkMode) {
     const profile = createDefaultTuningProfile();
     profile.oneEuro = { minCutoff: 20, beta: 1, derivativeCutoff: 1 };
     profile.minimumHoldMs = 0;
     const subject = new ExpressionPipeline(profile);
-    subject.setSuppressBriefBlinks(suppress);
+    subject.setBlinkMode(mode);
     return subject;
   }
 
-  it("ignores a quick tracked blink but shows eyes held closed", () => {
-    const subject = pipeline(true);
+  it("ignores a quick tracked blink but shows eyes held closed in camera + auto mode", () => {
+    const subject = pipeline("both");
 
     expect(subject.processFrame(closedEyes, undefined, 0).expressionIndex).toBe(
       FFLExpression.Normal,
@@ -193,10 +194,24 @@ describe("brief blink suppression", () => {
     );
   });
 
-  it("passes tracked blinks straight through when suppression is off", () => {
-    expect(pipeline(false).processFrame(closedEyes, undefined, 0).expressionIndex).toBe(
+  it("passes tracked blinks straight through in camera mode", () => {
+    expect(pipeline("camera").processFrame(closedEyes, undefined, 0).expressionIndex).toBe(
       FFLExpression.Blink,
     );
+  });
+
+  it("ignores tracked eyes entirely in auto only mode", () => {
+    const subject = pipeline("auto");
+
+    expect(subject.processFrame(closedEyes, undefined, 0).expressionIndex).toBe(
+      FFLExpression.Normal,
+    );
+    expect(subject.processFrame(closedEyes, undefined, 1000).expressionIndex).toBe(
+      FFLExpression.Normal,
+    );
+    expect(
+      subject.processFrame(shapes({ eyeBlinkLeft: 0.9 }), undefined, 2000).expressionIndex,
+    ).toBe(FFLExpression.Normal);
   });
 });
 

@@ -11,7 +11,16 @@ import {
 } from "./lib/expressionPipeline";
 import { FaceTracker, type FaceTrackerFrame } from "./lib/faceTracker";
 import { AvatarPoseCoordinator } from "./lib/avatarPoseCoordinator";
-import { AutoBlinker, withBlink } from "./lib/autoBlink";
+import {
+  AutoBlinker,
+  type AutoBlinkOptions,
+  type BlinkMode,
+  DEFAULT_BLINK_MODE,
+  isBlinkMode,
+  normalizeAutoBlinkOptions,
+  usesAutoBlink,
+  withBlink,
+} from "./lib/autoBlink";
 import { LipSyncEnvelope, rootMeanSquare } from "./lib/lipSync";
 import { AvatarScene, type AvatarBackground } from "./lib/scene";
 import { ensureReady, type FFLContext } from "./lib/fflRenderer";
@@ -249,14 +258,17 @@ import {
 } from "./lib/tour";
 import { TourPresenter } from "./lib/tourPresenter";
 import {
-  AUTO_BLINK_STORAGE_KEY,
+  AUTO_BLINK_OPTIONS_STORAGE_KEY,
+  BLINK_MODE_STORAGE_KEY,
   BODY_VISIBLE_STORAGE_KEY,
   MIRROR_TRACKING_STORAGE_KEY,
   readBooleanPreference,
+  readJsonPreference,
   readStringPreference,
   SHADING_STYLE_STORAGE_KEY,
   SHOW_DEBUG_INFO_STORAGE_KEY,
   writeBooleanPreference,
+  writeJsonPreference,
   writeStringPreference,
 } from "./lib/preferences";
 import {
@@ -284,6 +296,11 @@ import {
 } from "./lib/errorSpeaker";
 
 const AUTO_BLINK_TICK_MS = 30;
+const BLINK_MODE_HINTS: Record<BlinkMode, string> = {
+  camera: "Your Mii blinks only when you blink.",
+  both: "Adds natural blinks and hides quick camera blinks. Eyes you hold closed still show.",
+  auto: "Ignores the camera for your eyes. Try this if glasses or glare cause false blinks.",
+};
 
 const searchParams = new URLSearchParams(window.location.search);
 
@@ -319,7 +336,16 @@ const emptyPreviewEl = document.querySelector<HTMLElement>(".empty-preview");
 const previewFrameEl = document.querySelector<HTMLElement>(".preview-frame");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
 const bodyVisibleInput = document.querySelector<HTMLInputElement>("#body-visible");
-const autoBlinkInput = document.querySelector<HTMLInputElement>("#auto-blink");
+const blinkModeInputs = Array.from(
+  document.querySelectorAll<HTMLInputElement>('input[name="blink-mode"]'),
+);
+const blinkModeHintEl = document.querySelector<HTMLElement>("#blink-mode-hint");
+const blinkRateInput = document.querySelector<HTMLInputElement>("#blink-rate");
+const blinkRateValueEl = document.querySelector<HTMLOutputElement>("#blink-rate-value");
+const blinkDurationInput = document.querySelector<HTMLInputElement>("#blink-duration");
+const blinkDurationValueEl = document.querySelector<HTMLOutputElement>(
+  "#blink-duration-value",
+);
 const mirrorTrackingInput = document.querySelector<HTMLInputElement>("#mirror-tracking");
 const shadingStyleSelect = document.querySelector<HTMLSelectElement>(
   "#shading-style-select",
@@ -449,6 +475,7 @@ let currentAvatarPose: AvatarPose = {
 };
 let baseExpressionIndex: number = FFLExpression.Normal;
 const autoBlinker = new AutoBlinker();
+let blinkMode: BlinkMode = DEFAULT_BLINK_MODE;
 let autoBlinkClosed = false;
 // When the tracker loses the face, hold the last pose briefly (so blinks of
 // detection don't move the avatar), then ease the head back to neutral.
@@ -850,13 +877,22 @@ expressionSelect?.addEventListener("change", () => {
   logRenderEvent("manual expression selected", { expressionIndex });
 });
 
-autoBlinkInput?.addEventListener("change", () => {
-  const enabled = autoBlinkInput.checked;
-  writeBooleanPreference(AUTO_BLINK_STORAGE_KEY, enabled);
-  expressionPipeline.setSuppressBriefBlinks(enabled);
-  tickAutoBlink();
-  logRenderEvent("auto blink toggled", { enabled });
-});
+for (const input of blinkModeInputs) {
+  input.addEventListener("change", () => {
+    if (!input.checked || !isBlinkMode(input.value)) return;
+    writeStringPreference(BLINK_MODE_STORAGE_KEY, input.value);
+    applyBlinkMode(input.value);
+    logRenderEvent("blink mode changed", { mode: input.value });
+  });
+}
+
+for (const input of [blinkRateInput, blinkDurationInput]) {
+  input?.addEventListener("input", () => {
+    const options = readAutoBlinkInputs();
+    writeJsonPreference(AUTO_BLINK_OPTIONS_STORAGE_KEY, options);
+    applyAutoBlinkOptions(options);
+  });
+}
 
 mirrorTrackingInput?.addEventListener("change", () => {
   const enabled = mirrorTrackingInput.checked;
@@ -1757,10 +1793,38 @@ function initializeBodyVisibleToggle() {
 
 
 function initializeAutoBlink() {
-  const enabled = readBooleanPreference(AUTO_BLINK_STORAGE_KEY, true);
-  if (autoBlinkInput) autoBlinkInput.checked = enabled;
-  expressionPipeline.setSuppressBriefBlinks(enabled);
+  const storedMode = readStringPreference(BLINK_MODE_STORAGE_KEY);
+  applyAutoBlinkOptions(
+    normalizeAutoBlinkOptions(readJsonPreference(AUTO_BLINK_OPTIONS_STORAGE_KEY)),
+  );
+  applyBlinkMode(isBlinkMode(storedMode) ? storedMode : DEFAULT_BLINK_MODE);
   window.setInterval(tickAutoBlink, AUTO_BLINK_TICK_MS);
+}
+
+function applyBlinkMode(mode: BlinkMode) {
+  blinkMode = mode;
+  for (const input of blinkModeInputs) input.checked = input.value === mode;
+  if (blinkModeHintEl) blinkModeHintEl.textContent = BLINK_MODE_HINTS[mode];
+  const autoDisabled = !usesAutoBlink(mode);
+  if (blinkRateInput) blinkRateInput.disabled = autoDisabled;
+  if (blinkDurationInput) blinkDurationInput.disabled = autoDisabled;
+  expressionPipeline.setBlinkMode(mode);
+  tickAutoBlink();
+}
+
+function readAutoBlinkInputs(): AutoBlinkOptions {
+  return normalizeAutoBlinkOptions({
+    blinksPerMinute: Number(blinkRateInput?.value),
+    durationMs: Number(blinkDurationInput?.value),
+  });
+}
+
+function applyAutoBlinkOptions(options: AutoBlinkOptions) {
+  if (blinkRateInput) blinkRateInput.value = String(options.blinksPerMinute);
+  if (blinkRateValueEl) blinkRateValueEl.textContent = String(options.blinksPerMinute);
+  if (blinkDurationInput) blinkDurationInput.value = String(options.durationMs);
+  if (blinkDurationValueEl) blinkDurationValueEl.textContent = `${options.durationMs} ms`;
+  autoBlinker.setOptions(options);
 }
 
 function initializeMirrorTracking() {
@@ -1800,7 +1864,7 @@ async function applyShadingStyle(style: ShadingStyle) {
 }
 
 function tickAutoBlink() {
-  const active = !!autoBlinkInput?.checked;
+  const active = usesAutoBlink(blinkMode);
   if (!active) autoBlinker.reset();
   const closed = active && autoBlinker.update(performance.now());
   if (closed === autoBlinkClosed) return;
@@ -2164,7 +2228,7 @@ function wireLibraryControls() {
       const willOpen = popover.hidden;
       if (willOpen) {
         openPopover(popover, index);
-        if (name === "camera") {
+        if (name === "tracking") {
           void refreshCameraList({ primePermission: true });
         }
       } else {
