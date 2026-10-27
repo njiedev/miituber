@@ -51,31 +51,16 @@ export class AutoBlinker {
   }
 }
 
-const KEEP_EYES = new Set<FFLExpression>([
-  FFLExpression.Blink,
-  FFLExpression.BlinkOpenMouth,
-  FFLExpression.WinkLeft,
-  FFLExpression.WinkRight,
-  FFLExpression.WinkLeftOpenMouth,
-  FFLExpression.WinkRightOpenMouth,
-  FFLExpression.Like,
-  FFLExpression.LikeWinkRight,
-  FFLExpression.Frustrated,
-]);
-
-const MOUTH_OPEN = new Set<FFLExpression>([
-  FFLExpression.OpenMouth,
-  FFLExpression.Happy,
-  FFLExpression.AngerOpenMouth,
-  FFLExpression.SorrowOpenMouth,
-  FFLExpression.SurpriseOpenMouth,
+// FFL expressions are whole-face presets, so there is no "angry with closed
+// eyes" variant. Swapping an emotion for Blink would also reset the brows and
+// mouth, so only neutral faces blink; every other expression is held as-is.
+const BLINK_VARIANTS = new Map<FFLExpression, FFLExpression>([
+  [FFLExpression.Normal, FFLExpression.Blink],
+  [FFLExpression.OpenMouth, FFLExpression.BlinkOpenMouth],
 ]);
 
 export function withBlink(expression: FFLExpression): FFLExpression {
-  if (KEEP_EYES.has(expression)) return expression;
-  return MOUTH_OPEN.has(expression)
-    ? FFLExpression.BlinkOpenMouth
-    : FFLExpression.Blink;
+  return BLINK_VARIANTS.get(expression) ?? expression;
 }
 
 export const SUSTAINED_EYE_CLOSE_MS = 500;

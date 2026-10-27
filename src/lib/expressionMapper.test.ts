@@ -85,7 +85,7 @@ describe("mapToExpression", () => {
     expect(result.expressionIndex).toBe(FFLExpression.Anger);
   });
 
-  it("prioritizes blink over smile because closed eyes are visually dominant", () => {
+  it("keeps the smile when smiling squints both eyes shut", () => {
     const result = mapToExpression(
       shapes({
         eyeBlinkLeft: 0.9,
@@ -95,7 +95,7 @@ describe("mapToExpression", () => {
       }),
     );
 
-    expect(result.expressionIndex).toBe(FFLExpression.Blink);
+    expect(result.expressionIndex).toBe(FFLExpression.Smile);
   });
 
   it("maps asymmetric blinks to wink expressions", () => {
@@ -186,8 +186,20 @@ describe("composeExpression", () => {
       FFLExpression.Blink,
     ],
     [
-      { eyes: "blink_both", mouth: "open", emotion: "smile" },
+      { eyes: "blink_both", mouth: "open", emotion: "normal" },
       FFLExpression.BlinkOpenMouth,
+    ],
+    [
+      { eyes: "blink_both", mouth: "closed", emotion: "smile" },
+      FFLExpression.Smile,
+    ],
+    [
+      { eyes: "blink_both", mouth: "open", emotion: "smile" },
+      FFLExpression.Happy,
+    ],
+    [
+      { eyes: "blink_both", mouth: "closed", emotion: "anger" },
+      FFLExpression.Anger,
     ],
     [
       { eyes: "wink_left", mouth: "closed", emotion: "normal" },
