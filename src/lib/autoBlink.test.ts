@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { AutoBlinker, SustainedSignalGate, withBlink } from "./autoBlink";
+import {
+  AutoBlinker,
+  isBlinkMode,
+  normalizeAutoBlinkOptions,
+  SustainedSignalGate,
+  usesAutoBlink,
+  withBlink,
+} from "./autoBlink";
 import { FFLExpression } from "./types";
 
 describe("auto blink timing", () => {
-  const options = { minIntervalMs: 2000, maxIntervalMs: 6000, durationMs: 150 };
+  const options = { blinksPerMinute: 15, durationMs: 150 };
 
   it("waits a randomized interval, closes the eyes briefly, then reopens", () => {
     const blinker = new AutoBlinker(options, () => 0.5);
@@ -34,6 +41,51 @@ describe("auto blink timing", () => {
 
     expect(blinker.update(10_000)).toBe(false);
     expect(blinker.update(14_000)).toBe(true);
+  });
+
+  it("spaces blinks by the blinks-per-minute rate and holds them for the duration", () => {
+    const blinker = new AutoBlinker({ blinksPerMinute: 30, durationMs: 250 }, () => 0.5);
+
+    expect(blinker.update(0)).toBe(false);
+    expect(blinker.update(1999)).toBe(false);
+    expect(blinker.update(2000)).toBe(true);
+    expect(blinker.update(2249)).toBe(true);
+    expect(blinker.update(2250)).toBe(false);
+  });
+
+  it("restarts the wait with the new timing when options change", () => {
+    const blinker = new AutoBlinker(options, () => 0.5);
+    blinker.update(0);
+    blinker.setOptions({ blinksPerMinute: 6, durationMs: 100 });
+
+    expect(blinker.update(1000)).toBe(false);
+    expect(blinker.update(10_999)).toBe(false);
+    expect(blinker.update(11_000)).toBe(true);
+    expect(blinker.update(11_100)).toBe(false);
+  });
+});
+
+describe("blink settings", () => {
+  it("recognizes the blink modes and which ones auto blink", () => {
+    expect(isBlinkMode("camera")).toBe(true);
+    expect(isBlinkMode("both")).toBe(true);
+    expect(isBlinkMode("auto")).toBe(true);
+    expect(isBlinkMode("sometimes")).toBe(false);
+    expect(usesAutoBlink("camera")).toBe(false);
+    expect(usesAutoBlink("both")).toBe(true);
+    expect(usesAutoBlink("auto")).toBe(true);
+  });
+
+  it("clamps stored auto blink options and falls back to defaults", () => {
+    expect(normalizeAutoBlinkOptions({ blinksPerMinute: 99, durationMs: 10 })).toEqual({
+      blinksPerMinute: 30,
+      durationMs: 80,
+    });
+    expect(normalizeAutoBlinkOptions(null)).toEqual({ blinksPerMinute: 15, durationMs: 150 });
+    expect(normalizeAutoBlinkOptions({ blinksPerMinute: "fast" })).toEqual({
+      blinksPerMinute: 15,
+      durationMs: 150,
+    });
   });
 });
 

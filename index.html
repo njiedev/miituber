@@ -22,17 +22,6 @@
         </div>
 
         <div class="appbar-right">
-          <label class="check appbar-toggle workspace-only">
-            <input id="body-visible" type="checkbox" checked />
-            Show body
-          </label>
-          <label
-            class="check appbar-toggle workspace-only"
-            title="Blink automatically"
-          >
-            <input id="auto-blink" type="checkbox" checked />
-            Auto blink
-          </label>
           <button
             id="tour-replay-button"
             class="tbtn tour-replay-button"
@@ -72,10 +61,10 @@
         <!-- Workspace: centered avatar + overlay controls -->
         <section class="workspace" aria-label="Avatar workspace">
           <nav class="side-rail" aria-label="Controls">
-            <button class="rail-item" type="button" data-menu="scene">Scene</button>
-            <button class="rail-item" type="button" data-menu="camera">Camera</button>
+            <button class="rail-item" type="button" data-menu="avatar">Avatar</button>
+            <button class="rail-item" type="button" data-menu="tracking">Tracking</button>
             <button class="rail-item" type="button" data-menu="mic">Microphone</button>
-            <button class="rail-item" type="button" data-menu="hotkeys">Hotkeys</button>
+            <button class="rail-item" type="button" data-menu="scene">Scene</button>
             <button class="rail-item" type="button" data-menu="advanced">Advanced</button>
           </nav>
 
@@ -94,21 +83,17 @@
             Press <kbd>Esc</kbd> to go back
           </div>
 
-          <!-- Scene -->
-          <div class="menu-popover" data-popover="scene" hidden>
+          <!-- Avatar -->
+          <div class="menu-popover" data-popover="avatar" hidden>
             <div class="menu-popover__header">
-              <h2>Scene</h2>
-              <button class="menu-popover__close" type="button" data-close="scene">&times;</button>
+              <h2>Avatar</h2>
+              <button class="menu-popover__close" type="button" data-close="avatar">&times;</button>
             </div>
             <label class="field">
               Expression
               <select id="expression-select" disabled>
                 <option value="0">0 Normal</option>
               </select>
-            </label>
-            <label class="field">
-              Background color
-              <input id="background-color" type="color" value="#e8f0f7" />
             </label>
             <label class="field">
               Shading style
@@ -121,16 +106,16 @@
               </select>
             </label>
             <label class="check">
-              <input id="transparent-background" type="checkbox" />
-              Transparent background
+              <input id="body-visible" type="checkbox" checked />
+              Show body
             </label>
           </div>
 
-          <!-- Camera -->
-          <div class="menu-popover" data-popover="camera" hidden>
+          <!-- Tracking -->
+          <div class="menu-popover" data-popover="tracking" hidden>
             <div class="menu-popover__header">
-              <h2>Camera</h2>
-              <button class="menu-popover__close" type="button" data-close="camera">&times;</button>
+              <h2>Tracking</h2>
+              <button class="menu-popover__close" type="button" data-close="tracking">&times;</button>
             </div>
             <label class="field">
               Device
@@ -150,6 +135,37 @@
               <input id="mirror-tracking" type="checkbox" />
               Mirror tracking
             </label>
+            <section class="eye-settings" aria-labelledby="eye-settings-title">
+              <h3 id="eye-settings-title">Eyes</h3>
+              <div class="field">
+                <span id="blink-mode-label">Blinking</span>
+                <div class="segmented" role="radiogroup" aria-labelledby="blink-mode-label">
+                  <label>
+                    <input type="radio" name="blink-mode" value="camera" />
+                    <span>Camera</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="blink-mode" value="both" checked />
+                    <span>Camera + auto</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="blink-mode" value="auto" />
+                    <span>Auto only</span>
+                  </label>
+                </div>
+                <span class="hint" id="blink-mode-hint"></span>
+              </div>
+              <label class="field range-field">
+                <span>Blinks per minute</span>
+                <output id="blink-rate-value" for="blink-rate">15</output>
+                <input id="blink-rate" type="range" min="4" max="30" step="1" />
+              </label>
+              <label class="field range-field">
+                <span>Blink duration</span>
+                <output id="blink-duration-value" for="blink-duration">150 ms</output>
+                <input id="blink-duration" type="range" min="80" max="300" step="10" />
+              </label>
+            </section>
             <p id="tracking-status" data-tone="idle">Start tracking when you are ready.</p>
             <p class="privacy-note">Camera and microphone stay on your device.</p>
           </div>
@@ -197,13 +213,20 @@
             </dl>
           </div>
 
-<!-- Hotkeys -->
-          <div class="menu-popover" data-popover="hotkeys" hidden>
+          <!-- Scene -->
+          <div class="menu-popover" data-popover="scene" hidden>
             <div class="menu-popover__header">
-              <h2>Hotkeys</h2>
-              <button class="menu-popover__close" type="button" data-close="hotkeys">&times;</button>
+              <h2>Scene</h2>
+              <button class="menu-popover__close" type="button" data-close="scene">&times;</button>
             </div>
-            <p class="coming-soon">Coming soon.</p>
+            <label class="field">
+              Background color
+              <input id="background-color" type="color" value="#e8f0f7" />
+            </label>
+            <label class="check">
+              <input id="transparent-background" type="checkbox" />
+              Transparent background
+            </label>
           </div>
 
           <!-- Advanced tuning & debug -->

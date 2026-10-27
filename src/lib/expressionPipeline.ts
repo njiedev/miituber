@@ -1,4 +1,4 @@
-import { SustainedSignalGate } from "./autoBlink";
+import { type BlinkMode, SustainedSignalGate } from "./autoBlink";
 import { mapToExpression } from "./expressionMapper";
 import { mirrorBlendshapes, mirrorTransformMatrix } from "./mirrorTracking";
 import {
@@ -54,7 +54,7 @@ export class ExpressionPipeline {
   private microphoneMouthTracker: HysteresisTracker;
   private blinkLeftGate = new SustainedSignalGate();
   private blinkRightGate = new SustainedSignalGate();
-  private suppressBriefBlinks = false;
+  private blinkMode: BlinkMode = "camera";
   private mirrorTracking = false;
 
   constructor(private profile: TuningProfile) {
@@ -83,8 +83,8 @@ export class ExpressionPipeline {
     this.microphoneMouthTracker.reset();
   }
 
-  setSuppressBriefBlinks(enabled: boolean) {
-    this.suppressBriefBlinks = enabled;
+  setBlinkMode(mode: BlinkMode) {
+    this.blinkMode = mode;
   }
 
   setMirrorTracking(enabled: boolean) {
@@ -128,9 +128,12 @@ export class ExpressionPipeline {
     const signals = this.signalTracker.update(rawMapped.scores);
     const sustainedBlinkLeft = this.blinkLeftGate.update(signals.blinkLeft, nowMs);
     const sustainedBlinkRight = this.blinkRightGate.update(signals.blinkRight, nowMs);
-    if (this.suppressBriefBlinks) {
+    if (this.blinkMode === "both") {
       signals.blinkLeft = sustainedBlinkLeft;
       signals.blinkRight = sustainedBlinkRight;
+    } else if (this.blinkMode === "auto") {
+      signals.blinkLeft = false;
+      signals.blinkRight = false;
     }
     const cameraMouthOpenSignal = signals.mouthOpen;
     const microphoneMouthOpenSignal = this.microphoneMouthTracker.update(

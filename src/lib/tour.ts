@@ -70,13 +70,25 @@ export const TOUR_CHAPTERS: Record<TourChapterId, TourChapter> = {
         id: "ws-rail",
         target: ".side-rail",
         emotion: "normal",
-        text: "This rail holds all your controls: scene, camera, microphone, output, and advanced settings.",
+        text: "This rail holds all your controls: avatar, tracking, microphone, scene, and advanced settings.",
+      },
+      {
+        id: "ws-avatar",
+        target: '.rail-item[data-menu="avatar"]',
+        emotion: "normal",
+        text: "Avatar lets you change your Mii's expression and shading style, and hide its body.",
       },
       {
         id: "ws-scene",
         target: '.rail-item[data-menu="scene"]',
         emotion: "normal",
-        text: "Scene lets you change your Mii's expression and the background — or make it transparent.",
+        text: "Scene sets the background color — or makes it transparent.",
+      },
+      {
+        id: "ws-eyes",
+        target: '.rail-item[data-menu="tracking"]',
+        emotion: "wink",
+        text: "Tracking holds your camera settings and how your Mii blinks — follow your real blinks, add automatic ones, or both.",
       },
       {
         id: "ws-tracking",

@@ -629,13 +629,69 @@ select {
   gap: 8px;
 }
 
-.coming-soon {
-  color: var(--text-soft);
-  font-size: 0.85rem;
+.eye-settings {
+  display: grid;
+  gap: 9px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
-.appbar-toggle {
+.eye-settings h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.segmented {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.segmented label {
+  position: relative;
+  flex: 1;
+}
+
+.segmented input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.segmented span {
+  display: block;
+  padding: 6px 4px;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: center;
   white-space: nowrap;
+}
+
+.segmented label + label span {
+  border-left: 1px solid var(--border-strong);
+}
+
+.segmented input:checked + span {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 4px #ffffff;
+}
+
+.range-field input[type="range"]:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 #tracking-status,
