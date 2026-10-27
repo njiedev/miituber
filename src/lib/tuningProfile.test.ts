@@ -61,6 +61,19 @@ describe("tuning profile", () => {
     expect(profile.calibration).toEqual({ jawOpen: 1 });
   });
 
+  it("clamps head rotation offsets and defaults them for older profiles", () => {
+    const profile = normalizeTuningProfile({
+      headRotationOffset: { pitch: 90, roll: -90, yaw: Number.NaN },
+    });
+
+    expect(profile.headRotationOffset).toEqual({ pitch: 45, roll: -45, yaw: 0 });
+    expect(normalizeTuningProfile({}).headRotationOffset).toEqual({
+      pitch: 0,
+      roll: 0,
+      yaw: 0,
+    });
+  });
+
   it("round-trips through JSON", () => {
     const profile = createDefaultTuningProfile();
     profile.minimumHoldMs = 250;
