@@ -18,10 +18,11 @@ export class UpperBodyFollow {
     this.rest = chest.quaternion.clone();
   }
 
-  update(rotation: HeadRotation, trackedYaw: number, enabled: boolean, dt: number, intensity = 100) {
+  update(rotation: HeadRotation, trackedYaw: number, enabled: boolean, dt: number, intensity = 100, maxTurn = 30) {
     const strength = normalizeBodyIntensity(intensity) / 100;
+    const limit = normalizeBodyMaxTurn(maxTurn);
     const target = enabled && Number.isFinite(trackedYaw)
-      ? THREE.MathUtils.clamp(trackedYaw * 0.25 * strength, -12 * strength, 12 * strength)
+      ? THREE.MathUtils.clamp(trackedYaw * 0.25 * strength, -limit, limit)
       : 0;
     this.yaw += (target - this.yaw) * (1 - Math.exp(-Math.max(0, dt) / 0.18));
     if (!enabled) this.yaw = 0;
@@ -42,6 +43,12 @@ export class UpperBodyFollow {
 
 export function normalizeBodyIntensity(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
-    ? THREE.MathUtils.clamp(value, 0, 200)
+    ? THREE.MathUtils.clamp(value, 0, 400)
     : 100;
+}
+
+export function normalizeBodyMaxTurn(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? THREE.MathUtils.clamp(value, 0, 45)
+    : 30;
 }

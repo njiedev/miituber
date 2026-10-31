@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { UpperBodyFollow, normalizeBodyIntensity } from "./upperBodyFollow";
+import { UpperBodyFollow, normalizeBodyIntensity, normalizeBodyMaxTurn } from "./upperBodyFollow";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { CharModel } from "ffl.js";
 import type { BodyModel } from "ffl.js/helpers/BodyUtilities.js";
@@ -72,6 +72,7 @@ export class AvatarScene {
   private upperBodyFollowEnabled = false;
   private upperBodyFollow: UpperBodyFollow | null = null;
   private upperBodyIntensity = 100;
+  private upperBodyMaxTurn = 30;
   private trackedYaw = 0;
   private lastPoseAt = performance.now();
   private shadingStyle: ShadingStyle = DEFAULT_SHADING_STYLE;
@@ -207,6 +208,10 @@ export class AvatarScene {
     this.applyHeadPose(0);
   }
 
+  setUpperBodyMaxTurn(value: number) {
+    this.upperBodyMaxTurn = normalizeBodyMaxTurn(value);
+  }
+
   setUpperBodyIntensity(intensity: number) {
     this.upperBodyIntensity = normalizeBodyIntensity(intensity);
   }
@@ -219,7 +224,7 @@ export class AvatarScene {
   private applyHeadPose(dt: number) {
     const rotation = this.headRotation ?? { pitch: 0, yaw: 0, roll: 0 };
     if (this.upperBodyFollow) {
-      this.upperBodyFollow.update(rotation, this.trackedYaw, this.upperBodyFollowEnabled && this.bodyVisible, dt, this.upperBodyIntensity);
+      this.upperBodyFollow.update(rotation, this.trackedYaw, this.upperBodyFollowEnabled && this.bodyVisible, dt, this.upperBodyIntensity, this.upperBodyMaxTurn);
       return;
     }
     // With a body attached, rotate only the head group (childed to the neck

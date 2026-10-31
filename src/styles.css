@@ -1915,3 +1915,12 @@ body.capture-isolate .isolate-hint.is-visible {
     }
   }
 }
+
+.body-movement-settings { display: grid; gap: 10px; }
+.body-movement-settings h3 { margin: 0; font-size: 13px; }
+.body-movement-control { display: grid; gap: 6px; font-size: 12px; }
+.body-movement-row { display: flex; align-items: center; gap: 6px; }
+.body-movement-row input[type="range"] { flex: 1; min-width: 0; }
+.body-movement-row input[type="number"] { width: 58px; padding: 4px; }
+.body-movement-settings summary { cursor: pointer; font-size: 12px; margin-bottom: 8px; }
+#body-movement-reset { justify-self: start; font-size: 12px; }
