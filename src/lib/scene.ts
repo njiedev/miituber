@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { UpperBodyFollow, normalizeBodyIntensity } from "./upperBodyFollow";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { CharModel } from "ffl.js";
 import type { BodyModel } from "ffl.js/helpers/BodyUtilities.js";
@@ -68,6 +69,11 @@ export class AvatarScene {
   /** Captured disposeModel() from BodyUtilities so sync teardown can use it. */
   private disposeBodyModelFn: ((model: THREE.Object3D) => void) | null = null;
   private bodyVisible = true;
+  private upperBodyFollowEnabled = false;
+  private upperBodyFollow: UpperBodyFollow | null = null;
+  private upperBodyIntensity = 100;
+  private trackedYaw = 0;
+  private lastPoseAt = performance.now();
   private shadingStyle: ShadingStyle = DEFAULT_SHADING_STYLE;
   /** Style the current model was built with; differs from shadingStyle while a rebuild is pending. */
   private builtShadingStyle: ShadingStyle | null = null;
@@ -195,8 +201,27 @@ export class AvatarScene {
     this.charModel?.setExpression(index);
   }
 
-  setHeadRotation(rotation: HeadRotation) {
+  setHeadRotation(rotation: HeadRotation, trackedYaw = rotation.yaw) {
     this.headRotation = rotation;
+    this.trackedYaw = trackedYaw;
+    this.applyHeadPose(0);
+  }
+
+  setUpperBodyIntensity(intensity: number) {
+    this.upperBodyIntensity = normalizeBodyIntensity(intensity);
+  }
+
+  setUpperBodyFollow(enabled: boolean) {
+    this.upperBodyFollowEnabled = enabled;
+    this.applyHeadPose(0);
+  }
+
+  private applyHeadPose(dt: number) {
+    const rotation = this.headRotation ?? { pitch: 0, yaw: 0, roll: 0 };
+    if (this.upperBodyFollow) {
+      this.upperBodyFollow.update(rotation, this.trackedYaw, this.upperBodyFollowEnabled && this.bodyVisible, dt, this.upperBodyIntensity);
+      return;
+    }
     // With a body attached, rotate only the head group (childed to the neck
     // bone) so the head turns on the body; otherwise rotate the whole model.
     const target = this.headRoot ?? this.currentModel;
@@ -228,6 +253,7 @@ export class AvatarScene {
   setBodyVisible(visible: boolean) {
     this.bodyVisible = visible;
     this.applyBodyVisibility();
+    this.applyHeadPose(0);
   }
 
   private enqueueModelTask<T>(task: () => Promise<T>): Promise<T> {
@@ -265,6 +291,11 @@ export class AvatarScene {
     this.bodyModel = attached.body;
     this.currentModel = attached.body.model;
     this.headRoot = attached.headRoot;
+    const chest = this.currentModel.getObjectByName("chest");
+    const headBone = this.currentModel.getObjectByName(attached.body.scaleDesc.head);
+    this.upperBodyFollow = chest && headBone
+      ? new UpperBodyFollow(chest, headBone, this.headRoot)
+      : null;
     this.disposeBodyModelFn = attached.disposeBodyModel;
     this.applyBodyVisibility();
 
@@ -278,7 +309,7 @@ export class AvatarScene {
 
     this.modelRoot.add(this.currentModel);
     this.setExpression(this.expressionIndex);
-    if (this.headRotation) this.setHeadRotation(this.headRotation);
+    if (this.headRotation) this.setHeadRotation(this.headRotation, this.trackedYaw);
     return meshCount;
   }
 
@@ -433,6 +464,7 @@ export class AvatarScene {
       this.loadedMii = null;
       this.currentModel = null;
       this.headRoot = null;
+      this.upperBodyFollow = null;
       this.disposeBodyModelFn = null;
       return;
     }
@@ -440,6 +472,8 @@ export class AvatarScene {
 
   private animate = () => {
     const now = performance.now();
+    this.applyHeadPose(Math.min((now - this.lastPoseAt) / 1000, 0.1));
+    this.lastPoseAt = now;
     this.renderFrameCount += 1;
 
     if (now - this.lastRenderFpsAt >= 1000) {

@@ -146,6 +146,15 @@
             <p id="mouse-tracking-note" class="privacy-note" hidden>
               Your Mii looks at your cursor, even while a game is fullscreen. Keep MiiTuber open, not minimized.
             </p>
+            <label class="check" title="Let the shoulders gently follow left and right head turns">
+              <input id="upper-body-follow" type="checkbox" />
+              Upper-body follow
+            </label>
+            <label class="field range-field">
+              <span>Body movement intensity</span>
+              <output id="upper-body-intensity-value" for="upper-body-intensity">1.0×</output>
+              <input id="upper-body-intensity" type="range" min="0" max="5" step="0.1" value="1" disabled />
+            </label>
             <section class="eye-settings" aria-labelledby="eye-settings-title">
               <h3 id="eye-settings-title">Eyes</h3>
               <div class="field">
