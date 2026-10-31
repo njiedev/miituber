@@ -1,4 +1,4 @@
-import { normalizeBodyIntensity, normalizeBodyMaxTurn } from "./lib/upperBodyFollow";
+import { normalizeBodyIntensity } from "./lib/upperBodyFollow";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
@@ -265,7 +265,7 @@ import {
   BODY_VISIBLE_STORAGE_KEY,
   UPPER_BODY_FOLLOW_STORAGE_KEY,
   UPPER_BODY_INTENSITY_STORAGE_KEY,
-  UPPER_BODY_MAX_TURN_STORAGE_KEY,
+  IDLE_SWAY_STORAGE_KEY,
   MIRROR_TRACKING_STORAGE_KEY,
   readBooleanPreference,
   readJsonPreference,
@@ -342,10 +342,8 @@ const emptyPreviewEl = document.querySelector<HTMLElement>(".empty-preview");
 const previewFrameEl = document.querySelector<HTMLElement>(".preview-frame");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
 const upperBodyIntensityInput = document.querySelector<HTMLInputElement>("#upper-body-intensity");
-const upperBodyIntensityValue = document.querySelector<HTMLInputElement>("#upper-body-intensity-value");
-const upperBodyMaxTurnInput = document.querySelector<HTMLInputElement>("#upper-body-max-turn");
-const upperBodyMaxTurnValue = document.querySelector<HTMLInputElement>("#upper-body-max-turn-value");
-const bodyMovementReset = document.querySelector<HTMLButtonElement>("#body-movement-reset");
+const upperBodyIntensityValue = document.querySelector<HTMLOutputElement>("#upper-body-intensity-value");
+const idleSwayInput = document.querySelector<HTMLInputElement>("#idle-sway");
 const upperBodyFollowInput = document.querySelector<HTMLInputElement>("#upper-body-follow");
 const bodyVisibleInput = document.querySelector<HTMLInputElement>("#body-visible");
 const blinkModeInputs = Array.from(
@@ -952,34 +950,22 @@ shadingStyleSelect?.addEventListener("change", () => {
   if (isShadingStyle(style)) void applyShadingStyle(style);
 });
 
-for (const input of [upperBodyIntensityInput, upperBodyIntensityValue]) {
-  input?.addEventListener("input", () => {
-    if (!Number.isFinite(input.valueAsNumber)) return;
-    const intensity = normalizeBodyIntensity(input.valueAsNumber * 100);
-    applyBodyIntensity(intensity);
-    writeJsonPreference(UPPER_BODY_INTENSITY_STORAGE_KEY, intensity);
-  });
-}
+upperBodyIntensityInput?.addEventListener("input", () => {
+  const intensity = normalizeBodyIntensity(upperBodyIntensityInput.valueAsNumber);
+  applyBodyIntensity(intensity);
+  writeJsonPreference(UPPER_BODY_INTENSITY_STORAGE_KEY, intensity);
+});
 
-for (const input of [upperBodyMaxTurnInput, upperBodyMaxTurnValue]) {
-  input?.addEventListener("input", () => {
-    if (!Number.isFinite(input.valueAsNumber)) return;
-    const value = normalizeBodyMaxTurn(input.valueAsNumber);
-    applyBodyMaxTurn(value);
-    writeJsonPreference(UPPER_BODY_MAX_TURN_STORAGE_KEY, value);
-  });
-}
-
-bodyMovementReset?.addEventListener("click", () => {
-  applyBodyIntensity(100);
-  applyBodyMaxTurn(30);
-  writeJsonPreference(UPPER_BODY_INTENSITY_STORAGE_KEY, 100);
-  writeJsonPreference(UPPER_BODY_MAX_TURN_STORAGE_KEY, 30);
+idleSwayInput?.addEventListener("change", () => {
+  const enabled = idleSwayInput.checked;
+  avatarScene.setIdleSway(enabled);
+  writeBooleanPreference(IDLE_SWAY_STORAGE_KEY, enabled);
+  syncBodyIntensityEnabled();
 });
 
 upperBodyFollowInput?.addEventListener("change", () => {
   const enabled = upperBodyFollowInput.checked;
-  setBodyMovementControlsEnabled(enabled);
+  syncBodyIntensityEnabled();
   avatarScene.setUpperBodyFollow(enabled);
   writeBooleanPreference(UPPER_BODY_FOLLOW_STORAGE_KEY, enabled);
 });
@@ -1908,30 +1894,24 @@ function getTourStorage() {
 
 
 
-function setBodyMovementControlsEnabled(enabled: boolean) {
-  for (const input of [upperBodyIntensityInput, upperBodyIntensityValue, upperBodyMaxTurnInput, upperBodyMaxTurnValue]) {
-    if (input) input.disabled = !enabled;
-  }
-}
-
-function applyBodyMaxTurn(value: number) {
-  if (upperBodyMaxTurnInput) upperBodyMaxTurnInput.value = String(value);
-  if (upperBodyMaxTurnValue) upperBodyMaxTurnValue.value = String(value);
-  avatarScene.setUpperBodyMaxTurn(value);
-}
-
 function applyBodyIntensity(intensity: number) {
-  if (upperBodyIntensityInput) upperBodyIntensityInput.value = String(intensity / 100);
-  if (upperBodyIntensityValue) upperBodyIntensityValue.value = String(intensity / 100);
+  if (upperBodyIntensityInput) upperBodyIntensityInput.value = String(intensity);
+  if (upperBodyIntensityValue) upperBodyIntensityValue.value = `${intensity}%`;
   avatarScene.setUpperBodyIntensity(intensity);
 }
 
+function syncBodyIntensityEnabled() {
+  if (upperBodyIntensityInput) upperBodyIntensityInput.disabled = !upperBodyFollowInput?.checked && !idleSwayInput?.checked;
+}
+
 function initializeBodyVisibleToggle() {
-  applyBodyMaxTurn(normalizeBodyMaxTurn(readJsonPreference(UPPER_BODY_MAX_TURN_STORAGE_KEY)));
+  const sway = readBooleanPreference(IDLE_SWAY_STORAGE_KEY, false);
+  if (idleSwayInput) idleSwayInput.checked = sway;
+  avatarScene.setIdleSway(sway);
   applyBodyIntensity(normalizeBodyIntensity(readJsonPreference(UPPER_BODY_INTENSITY_STORAGE_KEY)));
   const follow = readBooleanPreference(UPPER_BODY_FOLLOW_STORAGE_KEY, false);
   if (upperBodyFollowInput) upperBodyFollowInput.checked = follow;
-  setBodyMovementControlsEnabled(follow);
+  syncBodyIntensityEnabled();
   avatarScene.setUpperBodyFollow(follow);
   const visible = readBooleanPreference(BODY_VISIBLE_STORAGE_KEY, true);
   if (bodyVisibleInput) bodyVisibleInput.checked = visible;

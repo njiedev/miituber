@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { UpperBodyFollow, normalizeBodyIntensity, normalizeBodyMaxTurn } from "./upperBodyFollow";
+import { UpperBodyFollow, normalizeBodyIntensity } from "./upperBodyFollow";
 import { createBodyModelLoader } from "./bodyModel";
 
 const pose = { pitch: 18, yaw: 40, roll: -12 };
@@ -45,7 +45,7 @@ for (const gender of ["male", "female"]) {
       follow.update(pose, 90, true, 1 / 60);
       expect(THREE.MathUtils.radToDeg(chest.quaternion.angleTo(rest))).toBeLessThan(2);
       for (let i = 0; i < 240; i++) follow.update(pose, -90, true, 1 / 60);
-      expect(THREE.MathUtils.radToDeg(chest.quaternion.angleTo(rest))).toBeCloseTo(22.5, 3);
+      expect(THREE.MathUtils.radToDeg(chest.quaternion.angleTo(rest))).toBeCloseTo(12, 3);
       const delta = chest.quaternion.clone().multiply(rest.clone().invert());
       expect(delta.y).toBeLessThan(0);
       for (let i = 0; i < 240; i++) follow.update(pose, 0, true, 1 / 60);
@@ -58,25 +58,31 @@ it("normalizes saved intensity", () => {
   expect(normalizeBodyIntensity(null)).toBe(100);
   expect(normalizeBodyIntensity(NaN)).toBe(100);
   expect(normalizeBodyIntensity(-1)).toBe(0);
-  expect(normalizeBodyIntensity(500)).toBe(400);
+  expect(normalizeBodyIntensity(300)).toBe(200);
 });
 
 it("scales movement from zero to double strength", async () => {
-  for (const intensity of [0, 50, 100, 200, 400]) {
+  for (const intensity of [0, 50, 100, 200]) {
     const { chest, follow } = await rig("male");
     const rest = chest.quaternion.clone();
-    for (let i = 0; i < 240; i++) follow.update(pose, 40, true, 1 / 60, intensity, 45);
+    for (let i = 0; i < 240; i++) follow.update(pose, 40, true, 1 / 60, intensity);
     expect(THREE.MathUtils.radToDeg(chest.quaternion.angleTo(rest))).toBeCloseTo(10 * intensity / 100, 3);
   }
 });
 
-it("limits exaggerated movement independently of strength", async () => {
-  expect(normalizeBodyMaxTurn(null)).toBe(30);
-  expect(normalizeBodyMaxTurn(90)).toBe(45);
-  for (const gender of ["male", "female"]) {
-    const { chest, follow } = await rig(gender);
+for (const gender of ["male", "female"]) {
+  it(`${gender} sways without tracking and settles when disabled`, async () => {
+    const { chest, head, foot, follow } = await rig(gender);
+    follow.update(pose, 0, false, 0);
     const rest = chest.quaternion.clone();
-    for (let i = 0; i < 240; i++) follow.update(pose, 90, true, 1 / 60, 400, 15);
-    expect(THREE.MathUtils.radToDeg(chest.quaternion.angleTo(rest))).toBeCloseTo(15, 3);
-  }
-});
+    const headRest = head.getWorldQuaternion(new THREE.Quaternion());
+    const footRest = foot.getWorldQuaternion(new THREE.Quaternion());
+    for (let i = 0; i < 90; i++) follow.update(pose, 0, false, 1 / 60, 100, true);
+    expect(THREE.MathUtils.radToDeg(chest.quaternion.angleTo(rest))).toBeGreaterThan(1);
+    expect(THREE.MathUtils.radToDeg(chest.quaternion.angleTo(rest))).toBeLessThanOrEqual(1.5);
+    expect(head.getWorldQuaternion(new THREE.Quaternion()).angleTo(headRest)).toBeLessThan(1e-6);
+    expect(foot.getWorldQuaternion(new THREE.Quaternion()).angleTo(footRest)).toBeLessThan(1e-6);
+    for (let i = 0; i < 360; i++) follow.update(pose, 0, false, 1 / 60, 100, false);
+    expect(chest.quaternion.angleTo(rest)).toBeLessThan(1e-6);
+  });
+}

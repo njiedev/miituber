@@ -1,4 +1,4 @@
-export const UPPER_BODY_MAX_TURN_STORAGE_KEY = "miituber.upperBodyMaxTurn.v1";
+export const IDLE_SWAY_STORAGE_KEY = "miituber.idleSway.v1";
 export const UPPER_BODY_INTENSITY_STORAGE_KEY = "miituber.upperBodyIntensity.v1";
 export const UPPER_BODY_FOLLOW_STORAGE_KEY = "miituber.upperBodyFollow.v1";
 export const BODY_VISIBLE_STORAGE_KEY = "miituber.bodyVisible.v1";
