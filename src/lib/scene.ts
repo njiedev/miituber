@@ -72,7 +72,6 @@ export class AvatarScene {
   private upperBodyFollowEnabled = false;
   private upperBodyFollow: UpperBodyFollow | null = null;
   private upperBodyIntensity = 100;
-  private idleSwayEnabled = false;
   private trackedYaw = 0;
   private lastPoseAt = performance.now();
   private shadingStyle: ShadingStyle = DEFAULT_SHADING_STYLE;
@@ -208,10 +207,6 @@ export class AvatarScene {
     this.applyHeadPose(0);
   }
 
-  setIdleSway(enabled: boolean) {
-    this.idleSwayEnabled = enabled;
-  }
-
   setUpperBodyIntensity(intensity: number) {
     this.upperBodyIntensity = normalizeBodyIntensity(intensity);
   }
@@ -224,7 +219,7 @@ export class AvatarScene {
   private applyHeadPose(dt: number) {
     const rotation = this.headRotation ?? { pitch: 0, yaw: 0, roll: 0 };
     if (this.upperBodyFollow) {
-      this.upperBodyFollow.update(rotation, this.trackedYaw, this.upperBodyFollowEnabled && this.bodyVisible, dt, this.upperBodyIntensity, this.idleSwayEnabled && this.bodyVisible);
+      this.upperBodyFollow.update(rotation, this.trackedYaw, this.upperBodyFollowEnabled && this.bodyVisible, dt, this.upperBodyIntensity);
       return;
     }
     // With a body attached, rotate only the head group (childed to the neck

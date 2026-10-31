@@ -265,7 +265,6 @@ import {
   BODY_VISIBLE_STORAGE_KEY,
   UPPER_BODY_FOLLOW_STORAGE_KEY,
   UPPER_BODY_INTENSITY_STORAGE_KEY,
-  IDLE_SWAY_STORAGE_KEY,
   MIRROR_TRACKING_STORAGE_KEY,
   readBooleanPreference,
   readJsonPreference,
@@ -343,7 +342,6 @@ const previewFrameEl = document.querySelector<HTMLElement>(".preview-frame");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
 const upperBodyIntensityInput = document.querySelector<HTMLInputElement>("#upper-body-intensity");
 const upperBodyIntensityValue = document.querySelector<HTMLOutputElement>("#upper-body-intensity-value");
-const idleSwayInput = document.querySelector<HTMLInputElement>("#idle-sway");
 const upperBodyFollowInput = document.querySelector<HTMLInputElement>("#upper-body-follow");
 const bodyVisibleInput = document.querySelector<HTMLInputElement>("#body-visible");
 const blinkModeInputs = Array.from(
@@ -951,16 +949,9 @@ shadingStyleSelect?.addEventListener("change", () => {
 });
 
 upperBodyIntensityInput?.addEventListener("input", () => {
-  const intensity = normalizeBodyIntensity(upperBodyIntensityInput.valueAsNumber);
+  const intensity = normalizeBodyIntensity(upperBodyIntensityInput.valueAsNumber * 100);
   applyBodyIntensity(intensity);
   writeJsonPreference(UPPER_BODY_INTENSITY_STORAGE_KEY, intensity);
-});
-
-idleSwayInput?.addEventListener("change", () => {
-  const enabled = idleSwayInput.checked;
-  avatarScene.setIdleSway(enabled);
-  writeBooleanPreference(IDLE_SWAY_STORAGE_KEY, enabled);
-  syncBodyIntensityEnabled();
 });
 
 upperBodyFollowInput?.addEventListener("change", () => {
@@ -1895,19 +1886,16 @@ function getTourStorage() {
 
 
 function applyBodyIntensity(intensity: number) {
-  if (upperBodyIntensityInput) upperBodyIntensityInput.value = String(intensity);
-  if (upperBodyIntensityValue) upperBodyIntensityValue.value = `${intensity}%`;
+  if (upperBodyIntensityInput) upperBodyIntensityInput.value = String(intensity / 100);
+  if (upperBodyIntensityValue) upperBodyIntensityValue.value = `${(intensity / 100).toFixed(1)}×`;
   avatarScene.setUpperBodyIntensity(intensity);
 }
 
 function syncBodyIntensityEnabled() {
-  if (upperBodyIntensityInput) upperBodyIntensityInput.disabled = !upperBodyFollowInput?.checked && !idleSwayInput?.checked;
+  if (upperBodyIntensityInput) upperBodyIntensityInput.disabled = !upperBodyFollowInput?.checked;
 }
 
 function initializeBodyVisibleToggle() {
-  const sway = readBooleanPreference(IDLE_SWAY_STORAGE_KEY, false);
-  if (idleSwayInput) idleSwayInput.checked = sway;
-  avatarScene.setIdleSway(sway);
   applyBodyIntensity(normalizeBodyIntensity(readJsonPreference(UPPER_BODY_INTENSITY_STORAGE_KEY)));
   const follow = readBooleanPreference(UPPER_BODY_FOLLOW_STORAGE_KEY, false);
   if (upperBodyFollowInput) upperBodyFollowInput.checked = follow;
