@@ -1,3 +1,4 @@
+import { normalizeBodyIntensity } from "./lib/upperBodyFollow";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
@@ -262,6 +263,8 @@ import {
   AUTO_BLINK_OPTIONS_STORAGE_KEY,
   BLINK_MODE_STORAGE_KEY,
   BODY_VISIBLE_STORAGE_KEY,
+  UPPER_BODY_FOLLOW_STORAGE_KEY,
+  UPPER_BODY_INTENSITY_STORAGE_KEY,
   MIRROR_TRACKING_STORAGE_KEY,
   readBooleanPreference,
   readJsonPreference,
@@ -337,6 +340,9 @@ const importSaveButton = document.querySelector<HTMLButtonElement>("#import-save
 const emptyPreviewEl = document.querySelector<HTMLElement>(".empty-preview");
 const previewFrameEl = document.querySelector<HTMLElement>(".preview-frame");
 const expressionSelect = document.querySelector<HTMLSelectElement>("#expression-select");
+const upperBodyIntensityInput = document.querySelector<HTMLInputElement>("#upper-body-intensity");
+const upperBodyIntensityValue = document.querySelector<HTMLOutputElement>("#upper-body-intensity-value");
+const upperBodyFollowInput = document.querySelector<HTMLInputElement>("#upper-body-follow");
 const bodyVisibleInput = document.querySelector<HTMLInputElement>("#body-visible");
 const blinkModeInputs = Array.from(
   document.querySelectorAll<HTMLInputElement>('input[name="blink-mode"]'),
@@ -786,7 +792,7 @@ function setAvatarPose(expressionIndex: number, headRotation: HeadRotation) {
     pitch: headRotation.pitch + tuningProfile.headRotationOffset.pitch,
     roll: headRotation.roll + tuningProfile.headRotationOffset.roll,
     yaw: headRotation.yaw + tuningProfile.headRotationOffset.yaw,
-  });
+  }, headRotation.yaw);
 }
 
 function applyExpressionPose(expressionIndex: number, headRotation: HeadRotation) {
@@ -940,6 +946,19 @@ mirrorTrackingInput?.addEventListener("change", () => {
 shadingStyleSelect?.addEventListener("change", () => {
   const style = shadingStyleSelect.value;
   if (isShadingStyle(style)) void applyShadingStyle(style);
+});
+
+upperBodyIntensityInput?.addEventListener("input", () => {
+  const intensity = normalizeBodyIntensity(upperBodyIntensityInput.valueAsNumber);
+  applyBodyIntensity(intensity);
+  writeJsonPreference(UPPER_BODY_INTENSITY_STORAGE_KEY, intensity);
+});
+
+upperBodyFollowInput?.addEventListener("change", () => {
+  const enabled = upperBodyFollowInput.checked;
+  if (upperBodyIntensityInput) upperBodyIntensityInput.disabled = !enabled;
+  avatarScene.setUpperBodyFollow(enabled);
+  writeBooleanPreference(UPPER_BODY_FOLLOW_STORAGE_KEY, enabled);
 });
 
 bodyVisibleInput?.addEventListener("change", () => {
@@ -1866,7 +1885,18 @@ function getTourStorage() {
 
 
 
+function applyBodyIntensity(intensity: number) {
+  if (upperBodyIntensityInput) upperBodyIntensityInput.value = String(intensity);
+  if (upperBodyIntensityValue) upperBodyIntensityValue.value = `${intensity}%`;
+  avatarScene.setUpperBodyIntensity(intensity);
+}
+
 function initializeBodyVisibleToggle() {
+  applyBodyIntensity(normalizeBodyIntensity(readJsonPreference(UPPER_BODY_INTENSITY_STORAGE_KEY)));
+  const follow = readBooleanPreference(UPPER_BODY_FOLLOW_STORAGE_KEY, false);
+  if (upperBodyFollowInput) upperBodyFollowInput.checked = follow;
+  if (upperBodyIntensityInput) upperBodyIntensityInput.disabled = !follow;
+  avatarScene.setUpperBodyFollow(follow);
   const visible = readBooleanPreference(BODY_VISIBLE_STORAGE_KEY, true);
   if (bodyVisibleInput) bodyVisibleInput.checked = visible;
   avatarScene.setBodyVisible(visible);
