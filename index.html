@@ -483,6 +483,14 @@
 
       <!-- Opt-in development controls: run with ?test-updates=1. These are
            removed from production builds by main.ts. -->
+      <aside id="release-toast" class="release-toast" aria-label="Release note" hidden>
+        <div class="release-toast__copy" role="status" aria-live="polite" aria-atomic="true">
+          <span id="release-toast-version" class="release-toast__version"></span>
+          <span id="release-toast-message" class="release-toast__message"></span>
+        </div>
+        <button id="release-toast-close" class="release-toast__close" type="button" aria-label="Dismiss release note">×</button>
+      </aside>
+
       <aside class="update-dev-panel" id="update-dev-panel" hidden aria-label="Update popup tests">
         <strong>Update popup tests</strong>
         <button type="button" data-update-test="available">Available</button>
@@ -491,6 +499,7 @@
         <button type="button" data-update-test="ready">Ready</button>
         <button type="button" data-update-test="error">Error</button>
         <button type="button" data-update-test="whats-new">What’s New (once)</button>
+        <button type="button" data-update-test="small-update">Small update preview</button>
         <button type="button" data-update-test="clear-seen">Clear seen version</button>
       </aside>
 

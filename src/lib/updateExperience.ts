@@ -1,3 +1,5 @@
+import packageJson from "../../package.json";
+import { createReleaseToast } from "./releaseToast";
 import { getVersion } from "@tauri-apps/api/app";
 import {
   check as checkForUpdate,
@@ -83,6 +85,7 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
     "#update-modal-close",
   );
   const updateDevPanel = document.querySelector<HTMLElement>("#update-dev-panel");
+  const releaseToast = createReleaseToast();
   let updateModalActive = false;
   let updateExperienceChecking = true;
   let updatePrimaryAction: (() => void) | null = null;
@@ -295,12 +298,23 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
     )) {
       return;
     }
-    showWhatsNew(installedVersion, true);
+    showWhatsNew(installedVersion, true, previousVersion);
   }
 
-  function showWhatsNew(version: string, rememberOnDismiss: boolean) {
+  function showWhatsNew(version: string, rememberOnDismiss: boolean, previousVersion: string | null = null) {
     const release = releaseNotesForVersion(version);
     if (!release) return;
+    if (release.presentation === "toast") {
+      releaseToast.show(
+        previousVersion ?? release.previousVersion ?? version,
+        version,
+        release.items[0],
+        () => {
+          if (rememberOnDismiss) localStorage.setItem(LAST_SEEN_RELEASE_NOTES_KEY, version);
+        },
+      );
+      return;
+    }
 
     resetUpdateModal();
     if (updateCard) updateCard.dataset.kind = "whats-new";
@@ -421,6 +435,7 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
 
   function showUpdateModal() {
     if (!updateModal) return;
+    releaseToast.dismiss();
     deps.onModalOpen();
     updateModalActive = true;
     updateModal.hidden = false;
@@ -456,9 +471,10 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
       if (state === "available") showTestAvailableUpdate();
       if (state === "downloading") showDownloadingUpdate(35);
       if (state === "installing") showInstallingUpdate();
-      if (state === "ready") showReadyToRestart("0.2.2");
+      if (state === "ready") showReadyToRestart(packageJson.version);
       if (state === "error") showUpdateError(null, "Test error: nothing was changed.");
-      if (state === "whats-new") showWhatsNewIfNeeded("0.2.2", "0.2.1");
+      if (state === "whats-new") showWhatsNewIfNeeded(packageJson.version, releaseNotesForVersion(packageJson.version)?.previousVersion ?? "0.3.0");
+      if (state === "small-update") showWhatsNew(packageJson.version, false, releaseNotesForVersion(packageJson.version)?.previousVersion ?? null);
       if (state === "clear-seen") {
         localStorage.removeItem(LAST_SEEN_RELEASE_NOTES_KEY);
         button.textContent = "Cleared!";
@@ -469,7 +485,7 @@ export function createUpdateExperience(deps: UpdateExperienceDeps): UpdateExperi
 
   function showTestAvailableUpdate() {
     resetUpdateModal();
-    setUpdateModalCopy("A New Update is Available!", "MiiTuber 0.2.2 is ready. Would you like to install it?");
+    setUpdateModalCopy("A New Update is Available!", "MiiTuber " + packageJson.version + " is ready. Would you like to install it?");
     setUpdateModalButtons("Update Now", () => showDownloadingUpdate(0), "Update Later", hideUpdateModal);
     showUpdateModal();
   }

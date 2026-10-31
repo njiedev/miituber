@@ -19,6 +19,17 @@ function validateNotes(notes, expectedVersion) {
       `Release notes version ${JSON.stringify(notes.version)} does not match app version ${expectedVersion}.`,
     );
   }
+  if (notes.presentation !== undefined && !["modal", "toast"].includes(notes.presentation)) {
+    throw new Error("Release notes presentation must be modal or toast.");
+  }
+  if (notes.presentation === "toast") {
+    if (!SEMVER_PATTERN.test(requireString(notes.previousVersion, "Previous version"))) {
+      throw new Error("Previous version must be a semantic version.");
+    }
+    if (!Array.isArray(notes.items) || notes.items.length !== 1) {
+      throw new Error("Toast release notes must have exactly one short item.");
+    }
+  }
   requireString(notes.title, "Release notes title");
   requireString(notes.imageUrl, "Release notes imageUrl");
   if (!Array.isArray(notes.items) || notes.items.length === 0) {
@@ -41,6 +52,7 @@ function validateNotes(notes, expectedVersion) {
 }
 
 function toMarkdown(notes) {
+  if (notes.presentation === "toast") return notes.items[0] + "\n";
   const sections = [
     `## ${notes.title}`,
     notes.items.map((item) => `- ${item}`).join("\n"),

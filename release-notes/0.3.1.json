@@ -1,0 +1,10 @@
+{
+  "version": "0.3.1",
+  "presentation": "toast",
+  "previousVersion": "0.3.0",
+  "title": "What’s New in MiiTuber 0.3.1",
+  "items": [
+    "added body swaying"
+  ],
+  "imageUrl": "/update-modal-mii.png"
+}

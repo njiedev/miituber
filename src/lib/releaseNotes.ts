@@ -1,5 +1,7 @@
 export type ReleaseNotes = {
   version: string;
+  presentation?: "modal" | "toast";
+  previousVersion?: string;
   title: string;
   items: readonly string[];
   footer?: string;
@@ -61,4 +63,11 @@ export function hasLegacyInstallData(
   keys: readonly string[],
 ): boolean {
   return keys.some((key) => storage.getItem(key) !== null);
+}
+
+
+export function versionChangeParts(from: string, to: string) {
+  let index = 0;
+  while (index < from.length && index < to.length && from[index] === to[index]) index++;
+  return { unchanged: to.slice(0, index), changed: to.slice(index) };
 }
